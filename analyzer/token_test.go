@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package analyzer
 
 import (
@@ -110,7 +115,7 @@ func TestAnalyzeLine_AssignedValue(t *testing.T) {
 		{`apiKey = "sk-abc123"`, "apiKey", `"sk-abc123"`, true},
 		{`host := "localhost"`, "host", `"localhost"`, true},
 		{`x := 42`, "", "", false},           // 整数不是字符串
-		{`fmt.Println("hi")`, "", "", false},  // 函数调用不是赋值
+		{`fmt.Println("hi")`, "", "", false}, // 函数调用不是赋值
 	}
 
 	for _, tt := range tests {

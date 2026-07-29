@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package rules 提供基于 YAML 的规则 DSL（领域特定语言）。
 //
 // 用户可以用 YAML 文件定义自定义审查规则，不需要写 Go 代码。
@@ -45,16 +51,16 @@ type DSLRuleFile struct {
 
 // DSLRule 是单条 YAML 规则的定义。
 type DSLRule struct {
-	ID           string       `yaml:"id"`
-	Name         string       `yaml:"name"`
-	Severity     string       `yaml:"severity"`
-	Category     string       `yaml:"category"`
-	Description  string       `yaml:"description"`
-	Match        DSLMatch     `yaml:"match"`
-	Exclude      DSLExclude   `yaml:"exclude"`
-	Message      string       `yaml:"message"`
-	Recommendation string    `yaml:"recommendation"`
-	Confidence   float64      `yaml:"confidence"`
+	ID             string     `yaml:"id"`
+	Name           string     `yaml:"name"`
+	Severity       string     `yaml:"severity"`
+	Category       string     `yaml:"category"`
+	Description    string     `yaml:"description"`
+	Match          DSLMatch   `yaml:"match"`
+	Exclude        DSLExclude `yaml:"exclude"`
+	Message        string     `yaml:"message"`
+	Recommendation string     `yaml:"recommendation"`
+	Confidence     float64    `yaml:"confidence"`
 }
 
 // DSLMatch 定义匹配条件。
@@ -70,18 +76,18 @@ type DSLMatch struct {
 
 // DSLTokenFact 定义 token fact 的匹配条件。
 type DSLTokenFact struct {
-	Kind           string   `yaml:"kind"`            // token 类型：identifier, string_literal, assignment 等
-	ValueExact     string   `yaml:"value_exact"`     // 精确匹配值
-	ValueContains  []string `yaml:"value_contains"`  // 包含任一
-	ValuePattern   string   `yaml:"value_pattern"`   // 正则匹配
+	Kind           string   `yaml:"kind"`             // token 类型：identifier, string_literal, assignment 等
+	ValueExact     string   `yaml:"value_exact"`      // 精确匹配值
+	ValueContains  []string `yaml:"value_contains"`   // 包含任一
+	ValuePattern   string   `yaml:"value_pattern"`    // 正则匹配
 	ValueNotPrefix string   `yaml:"value_not_prefix"` // 不以此前缀开头
 }
 
 // DSLExclude 定义排除条件。
 type DSLExclude struct {
-	LineContains  []string `yaml:"line_contains"`
+	LineContains   []string `yaml:"line_contains"`
 	LineStartsWith []string `yaml:"line_starts_with"`
-	FileContains  []string `yaml:"file_contains"`
+	FileContains   []string `yaml:"file_contains"`
 }
 
 // ========== DSL 规则实现 ==========
@@ -116,8 +122,8 @@ func NewDSLRuleInstance(def DSLRule) (*DSLRuleInstance, error) {
 	return r, nil
 }
 
-func (r *DSLRuleInstance) ID() string            { return r.def.ID }
-func (r *DSLRuleInstance) Name() string          { return r.def.Name }
+func (r *DSLRuleInstance) ID() string                  { return r.def.ID }
+func (r *DSLRuleInstance) Name() string                { return r.def.Name }
 func (r *DSLRuleInstance) Severity() findings.Severity { return findings.Severity(r.def.Severity) }
 func (r *DSLRuleInstance) Category() findings.Category { return findings.Category(r.def.Category) }
 

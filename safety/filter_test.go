@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package safety
 
 import (
@@ -255,12 +260,12 @@ func TestFilterEnvVars(t *testing.T) {
 	f := NewSafetyFilter(nil)
 
 	env := map[string]string{
-		"GOPATH":          "/go",
-		"GOROOT":          "/usr/local/go",
-		"AWS_SECRET_KEY":  "should-be-removed",
-		"DATABASE_PASS":   "should-be-removed",
-		"PATH":            "/usr/bin",
-		"MY_CUSTOM_VAR":   "should-be-removed",
+		"GOPATH":         "/go",
+		"GOROOT":         "/usr/local/go",
+		"AWS_SECRET_KEY": "should-be-removed",
+		"DATABASE_PASS":  "should-be-removed",
+		"PATH":           "/usr/bin",
+		"MY_CUSTOM_VAR":  "should-be-removed",
 	}
 
 	filtered := f.FilterEnvVars(env)

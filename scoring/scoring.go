@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package scoring 提供代码审查风险评分系统。
 //
 // 不是简单的 high/medium/low 分级，而是 0-100 的连续风险分数，
@@ -21,19 +27,19 @@ import (
 
 // RiskScore 是代码审查的风险评分结果。
 type RiskScore struct {
-	Score     float64              `json:"score"`      // 总分 0-100（越高越危险）
-	Grade     string               `json:"grade"`      // 等级 A/B/C/D/F
-	Breakdown map[string]Dimension `json:"breakdown"`  // 各维度得分
-	FindingCount int               `json:"finding_count"` // findings 总数
-	WARNING   string               `json:"warning,omitempty"` // 警告信息
+	Score        float64              `json:"score"`             // 总分 0-100（越高越危险）
+	Grade        string               `json:"grade"`             // 等级 A/B/C/D/F
+	Breakdown    map[string]Dimension `json:"breakdown"`         // 各维度得分
+	FindingCount int                  `json:"finding_count"`     // findings 总数
+	WARNING      string               `json:"warning,omitempty"` // 警告信息
 }
 
 // Dimension 是单个评分维度。
 type Dimension struct {
-	Name    string  `json:"name"`     // 维度名称
-	Weight  float64 `json:"weight"`   // 权重
-	Score   float64 `json:"score"`    // 该维度得分 0-100
-	Count   int     `json:"count"`    // findings 数量
+	Name     string  `json:"name"`     // 维度名称
+	Weight   float64 `json:"weight"`   // 权重
+	Score    float64 `json:"score"`    // 该维度得分 0-100
+	Count    int     `json:"count"`    // findings 数量
 	Weighted float64 `json:"weighted"` // 加权得分
 }
 

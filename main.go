@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // code-review-agent 是一个自动代码审查系统。
 //
 // 输入 git diff、PR patch 或本地变更目录，通过规则引擎检测代码问题，

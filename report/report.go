@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package report 提供审查报告的生成功能。
 // 支持 JSON 和 Markdown 两种输出格式。
 package report
@@ -14,27 +20,27 @@ import (
 // ReviewReport 表示一次完整的代码审查报告。
 type ReviewReport struct {
 	// 基本信息
-	TaskID    string `json:"task_id"`              // 审查任务 ID
-	StartTime string `json:"start_time"`           // 审查开始时间
-	EndTime   string `json:"end_time"`             // 审查结束时间
-	Duration  string `json:"duration"`             // 耗时
+	TaskID    string `json:"task_id"`    // 审查任务 ID
+	StartTime string `json:"start_time"` // 审查开始时间
+	EndTime   string `json:"end_time"`   // 审查结束时间
+	Duration  string `json:"duration"`   // 耗时
 
 	// 输入信息
-	InputType string `json:"input_type"`           // 输入类型：diff_file / repo_path / fixture
-	InputPath string `json:"input_path"`           // 输入路径
-	FilesCount int   `json:"files_count"`          // 变更文件数
-	GoFilesCount int `json:"go_files_count"`       // Go 文件数
+	InputType    string `json:"input_type"`     // 输入类型：diff_file / repo_path / fixture
+	InputPath    string `json:"input_path"`     // 输入路径
+	FilesCount   int    `json:"files_count"`    // 变更文件数
+	GoFilesCount int    `json:"go_files_count"` // Go 文件数
 
 	// 审查结果
-	Summary   Summary         `json:"summary"`      // 摘要统计
-	Findings  []findings.Finding `json:"findings"`  // 高置信度发现
-	Warnings  []findings.Finding `json:"warnings"`  // 低置信度警告（需人工复核）
+	Summary  Summary            `json:"summary"`  // 摘要统计
+	Findings []findings.Finding `json:"findings"` // 高置信度发现
+	Warnings []findings.Finding `json:"warnings"` // 低置信度警告（需人工复核）
 
 	// 治理拦截摘要
 	Governance GovernanceSummary `json:"governance"`
 
 	// 沙箱执行
-	SandboxRuns   []SandboxRun   `json:"sandbox_runs,omitempty"`
+	SandboxRuns    []SandboxRun   `json:"sandbox_runs,omitempty"`
 	SandboxSummary SandboxSummary `json:"sandbox_summary"`
 
 	// 监控字段
@@ -43,29 +49,29 @@ type ReviewReport struct {
 
 // GovernanceSummary 记录治理拦截摘要。
 type GovernanceSummary struct {
-	TotalChecks    int      `json:"total_checks"`               // 总检查次数
-	Allowed        int      `json:"allowed"`                    // 允许执行
-	Denied         int      `json:"denied"`                     // 拒绝执行
-	AskHuman       int      `json:"ask_human"`                  // 需要人工确认
-	DeniedCommands []string `json:"denied_commands,omitempty"`   // 被拦截的命令列表
+	TotalChecks    int      `json:"total_checks"`              // 总检查次数
+	Allowed        int      `json:"allowed"`                   // 允许执行
+	Denied         int      `json:"denied"`                    // 拒绝执行
+	AskHuman       int      `json:"ask_human"`                 // 需要人工确认
+	DeniedCommands []string `json:"denied_commands,omitempty"` // 被拦截的命令列表
 }
 
 // SandboxSummary 记录沙箱执行摘要。
 type SandboxSummary struct {
-	TotalRuns     int    `json:"total_runs"`      // 总执行次数
-	Successful    int    `json:"successful"`       // 成功次数
-	Failed        int    `json:"failed"`           // 失败次数
-	TimedOut      int    `json:"timed_out"`        // 超时次数
-	TotalDuration string `json:"total_duration"`   // 总耗时
+	TotalRuns     int    `json:"total_runs"`     // 总执行次数
+	Successful    int    `json:"successful"`     // 成功次数
+	Failed        int    `json:"failed"`         // 失败次数
+	TimedOut      int    `json:"timed_out"`      // 超时次数
+	TotalDuration string `json:"total_duration"` // 总耗时
 }
 
 // Summary 是审查结果的摘要统计。
 type Summary struct {
-	TotalFindings int            `json:"total_findings"`   // 高置信度发现数
-	TotalWarnings int            `json:"total_warnings"`   // 低置信度警告数
-	DedupRemoved  int            `json:"dedup_removed"`    // 去重移除数
-	BySeverity    map[string]int `json:"by_severity"`      // 按严重级别统计
-	ByCategory    map[string]int `json:"by_category"`      // 按分类统计
+	TotalFindings int            `json:"total_findings"` // 高置信度发现数
+	TotalWarnings int            `json:"total_warnings"` // 低置信度警告数
+	DedupRemoved  int            `json:"dedup_removed"`  // 去重移除数
+	BySeverity    map[string]int `json:"by_severity"`    // 按严重级别统计
+	ByCategory    map[string]int `json:"by_category"`    // 按分类统计
 }
 
 // SandboxRun 记录一次沙箱执行（Week 3 扩展）。
@@ -80,16 +86,16 @@ type SandboxRun struct {
 
 // MonitorInfo 记录监控审计信息。
 type MonitorInfo struct {
-	TotalDuration    string  `json:"total_duration"`     // 总耗时
-	RuleDuration     string  `json:"rule_duration"`      // 规则执行耗时
-	SandboxDuration  string  `json:"sandbox_duration"`   // 沙箱执行耗时
-	ToolCallCount    int     `json:"tool_call_count"`    // 工具调用次数
-	RuleCount        int     `json:"rule_count"`         // 规则数量
-	FilesScanned     int     `json:"files_scanned"`      // 扫描文件数
-	PermissionDenied int     `json:"permission_denied"`  // 权限拦截次数
-	ExceptionCount   int     `json:"exception_count"`    // 异常次数
-	RiskScore        float64 `json:"risk_score"`         // 风险评分
-	RiskGrade        string  `json:"risk_grade"`         // 风险等级
+	TotalDuration    string  `json:"total_duration"`    // 总耗时
+	RuleDuration     string  `json:"rule_duration"`     // 规则执行耗时
+	SandboxDuration  string  `json:"sandbox_duration"`  // 沙箱执行耗时
+	ToolCallCount    int     `json:"tool_call_count"`   // 工具调用次数
+	RuleCount        int     `json:"rule_count"`        // 规则数量
+	FilesScanned     int     `json:"files_scanned"`     // 扫描文件数
+	PermissionDenied int     `json:"permission_denied"` // 权限拦截次数
+	ExceptionCount   int     `json:"exception_count"`   // 异常次数
+	RiskScore        float64 `json:"risk_score"`        // 风险评分
+	RiskGrade        string  `json:"risk_grade"`        // 风险等级
 }
 
 // NewReport 创建一个新的审查报告。

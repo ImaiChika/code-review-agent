@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package analyzer
 
 import (
@@ -13,11 +18,11 @@ import (
 //   - 知道 "secret123" 是一个字符串字面量（STRING），不是普通文本
 //   - 知道 ":=" 是赋值操作（DEFINE），不是普通文本
 type TokenFact struct {
-	Kind     TokenFactKind `json:"kind"`      // 事实类型
-	Value    string        `json:"value"`     // 原始值
-	Line     int           `json:"line"`      // 行号
-	Column   int           `json:"column"`    // 列号
-	Context  string        `json:"context"`   // 上下文（所在行的内容）
+	Kind    TokenFactKind `json:"kind"`    // 事实类型
+	Value   string        `json:"value"`   // 原始值
+	Line    int           `json:"line"`    // 行号
+	Column  int           `json:"column"`  // 列号
+	Context string        `json:"context"` // 上下文（所在行的内容）
 }
 
 // TokenFactKind 事实类型。
@@ -25,26 +30,26 @@ type TokenFactKind string
 
 const (
 	FactIdentifier    TokenFactKind = "identifier"     // 标识符：password, apiKey, Config
-	FactStringLiteral TokenFactKind = "string_literal"  // 字符串字面量："secret123"
-	FactIntLiteral    TokenFactKind = "int_literal"     // 整数字面量：42, 0xff
-	FactAssignment    TokenFactKind = "assignment"      // 赋值：= 或 :=
-	FactDefer         TokenFactKind = "defer"           // defer 语句
-	FactGo            TokenFactKind = "go"              // go 语句
-	FactReturn        TokenFactKind = "return"          // return 语句
-	FactIf            TokenFactKind = "if"              // if 语句
-	FactFor           TokenFactKind = "for"             // for 循环
-	FactSelect        TokenFactKind = "select"          // select 语句
-	FactChan          TokenFactKind = "chan"             // chan 操作
-	FactPackage       TokenFactKind = "package"         // package 声明
-	FactImport        TokenFactKind = "import"          // import 语句
-	FactComment       TokenFactKind = "comment"         // 注释
+	FactStringLiteral TokenFactKind = "string_literal" // 字符串字面量："secret123"
+	FactIntLiteral    TokenFactKind = "int_literal"    // 整数字面量：42, 0xff
+	FactAssignment    TokenFactKind = "assignment"     // 赋值：= 或 :=
+	FactDefer         TokenFactKind = "defer"          // defer 语句
+	FactGo            TokenFactKind = "go"             // go 语句
+	FactReturn        TokenFactKind = "return"         // return 语句
+	FactIf            TokenFactKind = "if"             // if 语句
+	FactFor           TokenFactKind = "for"            // for 循环
+	FactSelect        TokenFactKind = "select"         // select 语句
+	FactChan          TokenFactKind = "chan"           // chan 操作
+	FactPackage       TokenFactKind = "package"        // package 声明
+	FactImport        TokenFactKind = "import"         // import 语句
+	FactComment       TokenFactKind = "comment"        // 注释
 )
 
 // TokenAnalysis 是一行代码的词法分析结果。
 type TokenAnalysis struct {
-	Line     int         `json:"line"`
-	Content  string      `json:"content"`
-	Facts    []TokenFact `json:"facts"`
+	Line    int         `json:"line"`
+	Content string      `json:"content"`
+	Facts   []TokenFact `json:"facts"`
 }
 
 // TokenAnalyzer 是基于 go/scanner 的词法分析器。

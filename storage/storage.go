@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package storage 提供审查任务和结果的持久化存储。
 //
 // 基于 SQLite 实现，保留接口以便后续切换 SQL 后端。
@@ -65,28 +71,28 @@ const (
 
 // ReviewTask 表示一次审查任务。
 type ReviewTask struct {
-	TaskID      string     `json:"task_id"`
-	Status      TaskStatus `json:"status"`
-	InputType   string     `json:"input_type"`   // diff_file / repo_path / fixture
-	InputPath   string     `json:"input_path"`
-	FilesCount  int        `json:"files_count"`
-	GoFilesCount int       `json:"go_files_count"`
-	StartedAt   time.Time  `json:"started_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Duration    string     `json:"duration,omitempty"`
-	ErrorMsg    string     `json:"error_msg,omitempty"`
+	TaskID       string     `json:"task_id"`
+	Status       TaskStatus `json:"status"`
+	InputType    string     `json:"input_type"` // diff_file / repo_path / fixture
+	InputPath    string     `json:"input_path"`
+	FilesCount   int        `json:"files_count"`
+	GoFilesCount int        `json:"go_files_count"`
+	StartedAt    time.Time  `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	Duration     string     `json:"duration,omitempty"`
+	ErrorMsg     string     `json:"error_msg,omitempty"`
 }
 
 // SandboxRun 表示一次沙箱执行记录。
 type SandboxRun struct {
-	TaskID      string    `json:"task_id"`
-	Command     string    `json:"command"`
-	Backend     string    `json:"backend"` // local / container / e2b
-	ExitCode    int       `json:"exit_code"`
-	Output      string    `json:"output"`
-	Truncated   bool      `json:"truncated"`
-	Duration    string    `json:"duration"`
-	StartedAt   time.Time `json:"started_at"`
+	TaskID    string    `json:"task_id"`
+	Command   string    `json:"command"`
+	Backend   string    `json:"backend"` // local / container / e2b
+	ExitCode  int       `json:"exit_code"`
+	Output    string    `json:"output"`
+	Truncated bool      `json:"truncated"`
+	Duration  string    `json:"duration"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // PermissionDecision 表示一次权限决策记录。
@@ -515,7 +521,7 @@ func (s *SQLiteStore) GetReport(taskID string) (jsonReport, mdReport string, err
 // ========== 辅助方法 ==========
 
 // SaveFullResult 一次性保存完整的审查结果。
-func (s *SQLiteStore) SaveFullResult(task *ReviewTask, findingsList []findings.Finding, report interface{}) error {
+func (s *SQLiteStore) SaveFullResult(task *ReviewTask, findingsList []findings.Finding, report any) error {
 	// 保存任务
 	if err := s.CreateTask(task); err != nil {
 		return fmt.Errorf("保存任务失败: %w", err)
@@ -543,7 +549,7 @@ func (s *SQLiteStore) SaveFullResult(task *ReviewTask, findingsList []findings.F
 }
 
 // GetTaskSummary 获取任务摘要（任务 + findings 数量 + 状态）。
-func (s *SQLiteStore) GetTaskSummary(taskID string) (map[string]interface{}, error) {
+func (s *SQLiteStore) GetTaskSummary(taskID string) (map[string]any, error) {
 	task, err := s.GetTask(taskID)
 	if err != nil {
 		return nil, err
@@ -576,13 +582,13 @@ func (s *SQLiteStore) GetTaskSummary(taskID string) (map[string]interface{}, err
 		}
 	}
 
-	return map[string]interface{}{
-		"task":    task,
-		"high":    high,
-		"medium":  medium,
-		"low":     low,
-		"info":    info,
-		"total":   high + medium + low + info,
+	return map[string]any{
+		"task":   task,
+		"high":   high,
+		"medium": medium,
+		"low":    low,
+		"info":   info,
+		"total":  high + medium + low + info,
 	}, nil
 }
 

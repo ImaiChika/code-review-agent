@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package findings 定义代码审查结果的数据结构和处理逻辑。
 package findings
 
@@ -20,36 +26,36 @@ const (
 type Category string
 
 const (
-	CategorySecurity       Category = "security"        // 安全风险
-	CategoryResource       Category = "resource"        // 资源泄漏（goroutine、文件、连接）
-	CategoryErrorHandling  Category = "error_handling"  // 错误处理
-	CategoryTesting        Category = "testing"         // 测试缺失
-	CategoryLifecycle      Category = "lifecycle"       // 生命周期问题（DB连接、context）
-	CategorySensitiveLeak  Category = "sensitive_leak"  // 敏感信息泄漏
-	CategoryConcurrency    Category = "concurrency"     // 并发问题
+	CategorySecurity      Category = "security"       // 安全风险
+	CategoryResource      Category = "resource"       // 资源泄漏（goroutine、文件、连接）
+	CategoryErrorHandling Category = "error_handling" // 错误处理
+	CategoryTesting       Category = "testing"        // 测试缺失
+	CategoryLifecycle     Category = "lifecycle"      // 生命周期问题（DB连接、context）
+	CategorySensitiveLeak Category = "sensitive_leak" // 敏感信息泄漏
+	CategoryConcurrency   Category = "concurrency"    // 并发问题
 )
 
 // Finding 表示一次代码审查中发现的一个问题。
 type Finding struct {
 	// 基本信息
-	Severity     Severity `json:"severity"`               // 严重级别
-	Category     Category `json:"category"`               // 问题分类
-	RuleID       string   `json:"rule_id"`                // 规则编号，如 "SEC-001"
-	Title        string   `json:"title"`                  // 问题标题（一句话）
+	Severity Severity `json:"severity"` // 严重级别
+	Category Category `json:"category"` // 问题分类
+	RuleID   string   `json:"rule_id"`  // 规则编号，如 "SEC-001"
+	Title    string   `json:"title"`    // 问题标题（一句话）
 
 	// 定位信息
-	File         string   `json:"file"`                   // 文件路径
-	Line         int      `json:"line"`                   // 行号
-	Column       int      `json:"column,omitempty"`       // 列号（可选）
+	File   string `json:"file"`             // 文件路径
+	Line   int    `json:"line"`             // 行号
+	Column int    `json:"column,omitempty"` // 列号（可选）
 
 	// 详情
-	Evidence     string   `json:"evidence"`               // 证据（问题代码片段）
-	Recommendation string `json:"recommendation"`         // 修复建议
+	Evidence       string `json:"evidence"`       // 证据（问题代码片段）
+	Recommendation string `json:"recommendation"` // 修复建议
 
 	// 元数据
-	Confidence   float64  `json:"confidence"`             // 置信度 0.0-1.0
-	Source       string   `json:"source"`                 // 来源，如 "rule:hardcoded_secret"
-	Timestamp    string   `json:"timestamp"`              // 发现时间
+	Confidence float64 `json:"confidence"` // 置信度 0.0-1.0
+	Source     string  `json:"source"`     // 来源，如 "rule:hardcoded_secret"
+	Timestamp  string  `json:"timestamp"`  // 发现时间
 
 	// 去重相关（不输出到 JSON，仅内部使用）
 	dedupKey string

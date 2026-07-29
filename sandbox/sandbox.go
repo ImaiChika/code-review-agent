@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package sandbox 提供代码审查的沙箱执行能力。
 //
 // 基于 trpc-agent-go 的 codeexecutor/local 实现本地执行，
@@ -38,14 +44,14 @@ type ExecuteOptions struct {
 
 // ExecuteResult 执行结果。
 type ExecuteResult struct {
-	ExitCode  int       // 退出码（0 = 成功）
-	Stdout    string    // 标准输出
-	Stderr    string    // 标准错误
-	Output    string    // 合并输出（stdout + stderr）
-	Truncated bool      // 输出是否被截断
-	Duration  string    // 执行耗时
-	TimedOut  bool      // 是否超时
-	Backend   string    // 执行后端（local / container）
+	ExitCode  int    // 退出码（0 = 成功）
+	Stdout    string // 标准输出
+	Stderr    string // 标准错误
+	Output    string // 合并输出（stdout + stderr）
+	Truncated bool   // 输出是否被截断
+	Duration  string // 执行耗时
+	TimedOut  bool   // 是否超时
+	Backend   string // 执行后端（local / container）
 }
 
 // DefaultOptions 返回默认的执行选项。

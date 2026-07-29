@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package main
 
 import (
@@ -171,11 +176,11 @@ func TestIntegration_SensitiveInfoDetection(t *testing.T) {
 
 	// 验证 diff 中包含各种敏感信息
 	sensitivePatterns := []string{
-		"AKIA",                   // AWS Key
-		"ghp_",                   // GitHub Token
-		"SuperSecret",            // 密码
-		"postgres://",            // 数据库连接串
-		"eyJ",                    // JWT
+		"AKIA",                  // AWS Key
+		"ghp_",                  // GitHub Token
+		"SuperSecret",           // 密码
+		"postgres://",           // 数据库连接串
+		"eyJ",                   // JWT
 		"BEGIN RSA PRIVATE KEY", // 私钥
 	}
 

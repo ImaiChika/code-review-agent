@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package safety 提供敏感信息脱敏能力。
 //
 // 脱敏逻辑统一在此包中，供 sandbox、rules、report 等模块复用。

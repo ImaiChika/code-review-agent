@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package rules 提供基于 Token Facts 的代码审查规则。
 //
 // 所有规则使用 go/scanner 提取的语法感知 token facts，
@@ -23,9 +29,9 @@ import (
 //  2. 函数参数中，敏感标识符伴随可疑字符串
 //
 // 不会误报的情况：
-//  - 注释里的 password
-//  - password := os.Getenv("X")
-//  - password := "your-password-here"（占位符）
+//   - 注释里的 password
+//   - password := os.Getenv("X")
+//   - password := "your-password-here"（占位符）
 type TokenSecretRule struct {
 	analyzer *analyzer.TokenAnalyzer
 }
@@ -35,8 +41,8 @@ func NewTokenSecretRule() *TokenSecretRule {
 	return &TokenSecretRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenSecretRule) ID() string            { return "SEC-AST-001" }
-func (r *TokenSecretRule) Name() string          { return "Token 感知的密钥检测" }
+func (r *TokenSecretRule) ID() string                  { return "SEC-AST-001" }
+func (r *TokenSecretRule) Name() string                { return "Token 感知的密钥检测" }
 func (r *TokenSecretRule) Severity() findings.Severity { return findings.SeverityHigh }
 func (r *TokenSecretRule) Category() findings.Category { return findings.CategorySecurity }
 
@@ -122,8 +128,8 @@ func NewTokenLeakRule() *TokenLeakRule {
 	return &TokenLeakRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenLeakRule) ID() string            { return "SEC-AST-002" }
-func (r *TokenLeakRule) Name() string          { return "Token 感知的敏感信息泄漏检测" }
+func (r *TokenLeakRule) ID() string                  { return "SEC-AST-002" }
+func (r *TokenLeakRule) Name() string                { return "Token 感知的敏感信息泄漏检测" }
 func (r *TokenLeakRule) Severity() findings.Severity { return findings.SeverityHigh }
 func (r *TokenLeakRule) Category() findings.Category { return findings.CategorySensitiveLeak }
 
@@ -210,7 +216,7 @@ func detectLeakPattern(s string) (bool, string, float64) {
 		}
 	}
 	// URL with credentials
-	if (strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")) {
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 		atIdx := strings.Index(s, "@")
 		colonIdx := strings.Index(s, ":")
 		if atIdx > 0 && colonIdx > 0 && colonIdx < atIdx {
@@ -253,8 +259,8 @@ func NewTokenGoroutineRule() *TokenGoroutineRule {
 	return &TokenGoroutineRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenGoroutineRule) ID() string            { return "GOR-AST-001" }
-func (r *TokenGoroutineRule) Name() string          { return "Token 感知的 goroutine 泄漏检测" }
+func (r *TokenGoroutineRule) ID() string                  { return "GOR-AST-001" }
+func (r *TokenGoroutineRule) Name() string                { return "Token 感知的 goroutine 泄漏检测" }
 func (r *TokenGoroutineRule) Severity() findings.Severity { return findings.SeverityHigh }
 func (r *TokenGoroutineRule) Category() findings.Category { return findings.CategoryResource }
 
@@ -352,8 +358,8 @@ func NewTokenResourceRule() *TokenResourceRule {
 	return &TokenResourceRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenResourceRule) ID() string            { return "RES-AST-001" }
-func (r *TokenResourceRule) Name() string          { return "Token 感知的资源泄漏检测" }
+func (r *TokenResourceRule) ID() string                  { return "RES-AST-001" }
+func (r *TokenResourceRule) Name() string                { return "Token 感知的资源泄漏检测" }
 func (r *TokenResourceRule) Severity() findings.Severity { return findings.SeverityMedium }
 func (r *TokenResourceRule) Category() findings.Category { return findings.CategoryResource }
 
@@ -460,8 +466,8 @@ func NewTokenErrorRule() *TokenErrorRule {
 	return &TokenErrorRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenErrorRule) ID() string            { return "ERR-AST-001" }
-func (r *TokenErrorRule) Name() string          { return "Token 感知的错误处理检测" }
+func (r *TokenErrorRule) ID() string                  { return "ERR-AST-001" }
+func (r *TokenErrorRule) Name() string                { return "Token 感知的错误处理检测" }
 func (r *TokenErrorRule) Severity() findings.Severity { return findings.SeverityMedium }
 func (r *TokenErrorRule) Category() findings.Category { return findings.CategoryErrorHandling }
 
@@ -667,8 +673,8 @@ func NewTokenMissingTestRule() *TokenMissingTestRule {
 	return &TokenMissingTestRule{analyzer: analyzer.NewTokenAnalyzer()}
 }
 
-func (r *TokenMissingTestRule) ID() string            { return "TST-AST-001" }
-func (r *TokenMissingTestRule) Name() string          { return "Token 感知的测试缺失检测" }
+func (r *TokenMissingTestRule) ID() string                  { return "TST-AST-001" }
+func (r *TokenMissingTestRule) Name() string                { return "Token 感知的测试缺失检测" }
 func (r *TokenMissingTestRule) Severity() findings.Severity { return findings.SeverityLow }
 func (r *TokenMissingTestRule) Category() findings.Category { return findings.CategoryTesting }
 

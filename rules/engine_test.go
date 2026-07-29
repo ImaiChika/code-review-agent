@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package rules
 
 import (
@@ -20,8 +25,8 @@ type mockRule struct {
 	category findings.Category
 }
 
-func (r *mockRule) ID() string            { return r.id }
-func (r *mockRule) Name() string          { return r.name }
+func (r *mockRule) ID() string                  { return r.id }
+func (r *mockRule) Name() string                { return r.name }
 func (r *mockRule) Severity() findings.Severity { return r.severity }
 func (r *mockRule) Category() findings.Category { return r.category }
 
@@ -43,8 +48,8 @@ func (r *mockRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 // errorRule 总是返回错误，用于测试错误处理。
 type errorRule struct{}
 
-func (r *errorRule) ID() string            { return "ERR-001" }
-func (r *errorRule) Name() string          { return "错误规则" }
+func (r *errorRule) ID() string                  { return "ERR-001" }
+func (r *errorRule) Name() string                { return "错误规则" }
 func (r *errorRule) Severity() findings.Severity { return findings.SeverityLow }
 func (r *errorRule) Category() findings.Category { return findings.CategoryTesting }
 

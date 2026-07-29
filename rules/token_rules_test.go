@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package rules
 
 import (
@@ -105,7 +110,7 @@ func TestTokenSecretRule_ApiKey(t *testing.T) {
 +++ b/config.go
 @@ -5,2 +5,3 @@
  func init() {
-+	apiKey := "sk-abc123456789"
++	apiKey := "sk_prod_AbcDefGhiJklMnoPqrStu12"
  }
 `
 	rule := NewTokenSecretRule()

@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package diff
 
 import (
@@ -425,7 +430,7 @@ func TestExtractPackageName(t *testing.T) {
 		{"package utils", "utils"},
 		{"\tpackage main", "main"},       // 带缩进
 		{"  package models  ", "models"}, // 带空格
-		{"// package notthis", ""},        // 注释
+		{"// package notthis", ""},       // 注释
 		{"import \"fmt\"", ""},           // 非 package 行
 		{"", ""},                         // 空行
 		{"package", ""},                  // 缺包名

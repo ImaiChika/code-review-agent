@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package analyzer 提供基于 Go AST 的代码分析能力。
 //
 // 与正则匹配不同，AST 分析能理解代码结构：
@@ -19,11 +25,11 @@ import (
 
 // FileAnalysis 是一个文件的 AST 分析结果。
 type FileAnalysis struct {
-	FilePath    string         `json:"file_path"`
-	PackageName string         `json:"package_name"`
-	Imports     []ImportInfo   `json:"imports"`
-	Functions   []FuncInfo     `json:"functions"`
-	Globals     []VarInfo      `json:"globals"`
+	FilePath    string          `json:"file_path"`
+	PackageName string          `json:"package_name"`
+	Imports     []ImportInfo    `json:"imports"`
+	Functions   []FuncInfo      `json:"functions"`
+	Globals     []VarInfo       `json:"globals"`
 	Errors      []AnalysisError `json:"errors"`
 }
 
@@ -36,13 +42,13 @@ type ImportInfo struct {
 
 // FuncInfo 函数信息。
 type FuncInfo struct {
-	Name       string   `json:"name"`        // 函数名
-	Receiver   string   `json:"receiver"`    // 接收者类型（方法）
-	IsExported bool     `json:"is_exported"` // 是否导出
-	Params     []string `json:"params"`      // 参数类型
-	Returns    []string `json:"returns"`     // 返回值类型
-	Line       int      `json:"line"`        // 行号
-	Body       *ast.BlockStmt `json:"-"`     // 函数体（不序列化）
+	Name       string         `json:"name"`        // 函数名
+	Receiver   string         `json:"receiver"`    // 接收者类型（方法）
+	IsExported bool           `json:"is_exported"` // 是否导出
+	Params     []string       `json:"params"`      // 参数类型
+	Returns    []string       `json:"returns"`     // 返回值类型
+	Line       int            `json:"line"`        // 行号
+	Body       *ast.BlockStmt `json:"-"`           // 函数体（不序列化）
 }
 
 // VarInfo 变量信息。
@@ -241,7 +247,7 @@ func (a *Analyzer) typeToString(expr ast.Expr) string {
 	case *ast.FuncType:
 		return "func"
 	case *ast.InterfaceType:
-		return "interface{}"
+		return "any"
 	case *ast.ChanType:
 		return "chan"
 	default:

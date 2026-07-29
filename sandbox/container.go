@@ -1,3 +1,8 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
 package sandbox
 
 import (
@@ -66,13 +71,13 @@ func (s *ContainerSandbox) Execute(ctx context.Context, opts ExecuteOptions) (*E
 	// 构建 docker run 命令
 	args := []string{
 		"run",
-		"--rm",                           // 用完自动删除容器
-		"--network=none",                 // 禁止网络
-		"--memory=512m",                  // 限制内存
-		"--cpus=1",                       // 限制 CPU
-		"--read-only",                    // 只读文件系统
-		"--tmpfs", "/tmp:size=64m",       // 临时可写目录
-		"--user", "65532:65532",          // 非 root 用户
+		"--rm",                     // 用完自动删除容器
+		"--network=none",           // 禁止网络
+		"--memory=512m",            // 限制内存
+		"--cpus=1",                 // 限制 CPU
+		"--read-only",              // 只读文件系统
+		"--tmpfs", "/tmp:size=64m", // 临时可写目录
+		"--user", "65532:65532", // 非 root 用户
 	}
 
 	// 挂载工作目录（只读）

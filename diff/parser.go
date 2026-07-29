@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-agent-go available.
+//
+// Copyright (C) 2025 Tencent.  All rights reserved.
+//
+// trpc-agent-go is licensed under the Apache License Version 2.0.
+//
 // Package diff 提供 unified diff 格式的解析功能。
 // 它将 git diff 输出解析为结构化的变更信息，供审查规则使用。
 package diff
@@ -14,27 +20,27 @@ import (
 
 // FileDiff 表示一个文件的变更。
 type FileDiff struct {
-	OldPath string  // 原文件路径（--- a/xxx）
-	NewPath string  // 新文件路径（+++ b/xxx）
-	Hunks   []Hunk  // 变更块列表
+	OldPath string // 原文件路径（--- a/xxx）
+	NewPath string // 新文件路径（+++ b/xxx）
+	Hunks   []Hunk // 变更块列表
 }
 
 // Hunk 表示一个变更块（@@ ... @@ 包围的部分）。
 type Hunk struct {
-	OldStart int      // 原文件起始行号
-	OldLines int      // 原文件行数
-	NewStart int      // 新文件起始行号
-	NewLines int      // 新文件行数
-	Context  string   // @@ 后面的函数名/上下文（可选）
-	Lines    []Line   // 所有行（包括上下文、新增、删除）
+	OldStart int    // 原文件起始行号
+	OldLines int    // 原文件行数
+	NewStart int    // 新文件起始行号
+	NewLines int    // 新文件行数
+	Context  string // @@ 后面的函数名/上下文（可选）
+	Lines    []Line // 所有行（包括上下文、新增、删除）
 }
 
 // Line 表示 diff 中的一行。
 type Line struct {
-	Type     LineType // 行类型：上下文、新增、删除
-	Content  string   // 行内容（不含前缀符号）
-	OldLine  int      // 原文件行号（删除行和上下文行有值，新增行为 0）
-	NewLine  int      // 新文件行号（新增行和上下文行有值，删除行为 0）
+	Type    LineType // 行类型：上下文、新增、删除
+	Content string   // 行内容（不含前缀符号）
+	OldLine int      // 原文件行号（删除行和上下文行有值，新增行为 0）
+	NewLine int      // 新文件行号（新增行和上下文行有值，删除行为 0）
 }
 
 // LineType 行类型枚举。
