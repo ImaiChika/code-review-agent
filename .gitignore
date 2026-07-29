@@ -1,0 +1,38 @@
+# === 构建产物 ===
+code-review-agent
+*.exe
+*.test
+*.out
+
+# === 运行时生成 ===
+review.db
+*.db
+
+# === 辅助开发文件（不提交）===
+trpc.txt
+teach.txt
+GUIDE.md
+任务解读手册.md
+project_gap_and_innovation_review.txt
+repair.txt
+metadata.json
+
+# === 工具输出目录 ===
+out/
+runs/
+Users/
+work/
+
+# === IDE / 编辑器 ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Claude Code 配置 ===
+.claude/
