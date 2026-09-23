@@ -1,0 +1,9 @@
+{
+  "id": "neg_placeholder_001",
+  "description": "占位符/示例值（changeme/xxx-test/your-），不应报硬编码密钥",
+  "category": "security",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

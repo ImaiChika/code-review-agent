@@ -1,0 +1,8 @@
+--- a/mathutil.go
++++ b/mathutil.go
+@@ -1,2 +1,5 @@
+ package mathutil
+ 
++func AddMetrics(a, b int) int {
++    return a + b
++}

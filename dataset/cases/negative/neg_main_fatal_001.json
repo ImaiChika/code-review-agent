@@ -1,0 +1,9 @@
+{
+  "id": "neg_main_fatal_001",
+  "description": "main 包使用 log.Fatal 是合理的，不应报错误处理问题",
+  "category": "error_handling",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

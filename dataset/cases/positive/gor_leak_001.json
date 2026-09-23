@@ -1,0 +1,11 @@
+{
+  "id": "gor_leak_001",
+  "description": "goroutine 内无限 for 循环且无 ctx/select/stop 退出机制",
+  "category": "resource",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "GOR-AST-001", "file": "worker.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

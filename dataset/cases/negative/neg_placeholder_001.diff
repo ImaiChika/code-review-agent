@@ -1,0 +1,8 @@
+--- a/dev.go
++++ b/dev.go
+@@ -1,2 +1,5 @@
+ package dev
+ 
++var devPassword = "changeme-2026"
++var sampleToken = "xxx-test-value"
++var exampleSecret = "your-secret-here"

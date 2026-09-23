@@ -1,0 +1,9 @@
+--- a/client.go
++++ b/client.go
+@@ -1,4 +1,6 @@
+ package client
+ 
++const awsKey = "AKIAIOSFODNN7EXAMPLE"
++const ghToken = "ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+ 
+ func (c *Client) addr() string { return c.host }

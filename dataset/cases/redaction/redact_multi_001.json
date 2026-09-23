@@ -1,0 +1,13 @@
+{
+  "id": "redact_multi_001",
+  "description": "AWS Key + JWT + 密码混合样本，全部必须脱敏",
+  "category": "redaction",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-002", "file": "leaks.go", "line": 3},
+    {"rule_id": "SEC-AST-002", "file": "leaks.go", "line": 4},
+    {"rule_id": "SEC-AST-001", "file": "leaks.go", "line": 5}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": ["AKIAIOSFODNN7EXAMPLE", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c", "HardcodedPass2026"]
+}

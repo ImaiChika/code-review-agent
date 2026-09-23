@@ -1,0 +1,11 @@
+{
+  "id": "tst_missing_001",
+  "description": "新增导出函数没有对应测试（低置信度，应进 warnings）",
+  "category": "testing",
+  "difficulty": "easy",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "TST-AST-001", "file": "mathutil.go", "line": 3}
+  ],
+  "sensitive_literals": []
+}

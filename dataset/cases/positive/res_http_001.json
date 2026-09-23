@@ -1,0 +1,11 @@
+{
+  "id": "res_http_001",
+  "description": "http.Get 响应 Body 未 Close",
+  "category": "resource",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "RES-AST-001", "file": "fetch.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

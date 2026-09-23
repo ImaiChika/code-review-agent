@@ -1,0 +1,12 @@
+--- a/api.go
++++ b/api.go
+@@ -1,2 +1,9 @@
+ package api
+ 
++func save(b []byte) error {
++    err := write(b)
++    if err != nil {
++        return nil
++    }
++    return nil
++}

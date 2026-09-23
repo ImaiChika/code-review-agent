@@ -1,0 +1,7 @@
+--- a/creds.go
++++ b/creds.go
+@@ -1,2 +1,4 @@
+ package creds
+ 
++var apiKey = "sk-live-q1w2e3r4t5y6u7i8o9p0"
++var dbURL = "mysql://root:Hunter2Secret@prod-db:3306/app"

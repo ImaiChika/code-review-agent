@@ -1,0 +1,15 @@
+--- a/worker.go
++++ b/worker.go
+@@ -1,2 +1,12 @@
+ package worker
+ 
++func consume(ch chan int) {
++    go func() {
++        for {
++            v := <-ch
++            handle(v)
++        }
++    }()
++}
++
++func handle(v int) {}

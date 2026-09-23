@@ -123,6 +123,16 @@ sqlite3 review.db "SELECT task_id, status, input_path FROM cr_review_tasks ORDER
 sqlite3 review.db "SELECT severity, rule_id, file_path, line FROM cr_findings WHERE task_id='task-xxx';"
 ```
 
+### 2.5 质量评测数据集
+
+根目录 `dataset/` 是带 ground truth 标注的质量评测数据集（v0：20 样本 = 10 正 / 8 误报陷阱 / 2 脱敏），配套 harness `dataset_eval_test.go` 自动输出检出率/精确率/负样本误报率/脱敏泄漏四项指标并断言官方门禁：
+
+```bash
+go test -run TestDataset -v .   # 当前基线：recall 100%、precision 100%、negFPR 0%、脱敏 2 处泄漏（P0-1）
+```
+
+标注 schema、指标定义、新增样本流程见 `dataset/README.md`；成熟度里程碑与指标看板见 `ROADMAP.md`。
+
 ---
 
 ## 三、架构与数据流

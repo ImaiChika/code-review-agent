@@ -1,0 +1,9 @@
+{
+  "id": "neg_goroutine_ctx_001",
+  "description": "goroutine 有 select/ctx.Done 退出机制（无限循环+go 语句同时存在的陷阱）",
+  "category": "resource",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

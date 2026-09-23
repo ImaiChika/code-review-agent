@@ -1,0 +1,20 @@
+--- a/repo.go
++++ b/repo.go
+@@ -1,2 +1,17 @@
+ package repo
+ 
++func (r *Repo) users() ([]string, error) {
++    rows, err := r.db.Query("SELECT name FROM users WHERE active = 1")
++    if err != nil {
++        return nil, err
++    }
++    var names []string
++    for rows.Next() {
++        var n string
++        if err := rows.Scan(&n); err != nil {
++            return nil, err
++        }
++        names = append(names, n)
++    }
++    return names, nil
++}

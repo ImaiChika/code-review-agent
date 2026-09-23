@@ -1,0 +1,10 @@
+--- a/cmd/app/main.go
++++ b/cmd/app/main.go
+@@ -1,2 +1,7 @@
+ package main
+ 
++func main() {
++    if err := run(); err != nil {
++        log.Fatal(err)
++    }
++}

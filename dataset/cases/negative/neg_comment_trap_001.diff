@@ -1,0 +1,8 @@
+--- a/notes.go
++++ b/notes.go
+@@ -1,2 +1,5 @@
+ package notes
+ 
++// TODO: remove before merge - apiKey = "AKIAIOSFODNN7EXAMPLE"
++// const dbPassword = "RealPassword2026"
++func doc() string { return "see notes" }

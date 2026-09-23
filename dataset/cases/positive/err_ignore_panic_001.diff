@@ -1,0 +1,16 @@
+--- a/util.go
++++ b/util.go
+@@ -1,2 +1,13 @@
+ package util
+ 
++func flush(w io.Writer, data []byte) {
++    _ = writeAll(w, data)
++}
++
++func mustParse(s string) *Config {
++    cfg, _ := parse(s)
++    if cfg == nil {
++        panic("parse failed")
++    }
++    return cfg
++}

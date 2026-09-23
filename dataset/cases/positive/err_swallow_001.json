@@ -1,0 +1,11 @@
+{
+  "id": "err_swallow_001",
+  "description": "if err != nil 分支返回 nil 而不是 err（吞错误）",
+  "category": "error_handling",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "ERR-AST-001", "file": "api.go", "line": 5}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

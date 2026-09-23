@@ -1,0 +1,11 @@
+{
+  "id": "sec_dsn_001",
+  "description": "postgres 连接串内嵌明文密码",
+  "category": "sensitive_leak",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-002", "file": "db.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

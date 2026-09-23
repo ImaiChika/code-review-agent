@@ -1,0 +1,12 @@
+{
+  "id": "redact_evidence_001",
+  "description": "API Key 与 DB 连接串：finding evidence 必须脱敏，不得含明文",
+  "category": "redaction",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-001", "file": "creds.go", "line": 3},
+    {"rule_id": "SEC-AST-002", "file": "creds.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": ["sk-live-q1w2e3r4t5y6u7i8o9p0", "Hunter2Secret"]
+}

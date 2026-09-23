@@ -1,0 +1,13 @@
+{
+  "id": "sec_leak_tokens_002",
+  "description": "AWS Access Key 与 GitHub Token 字面量（同一行触发 SEC-001+SEC-002 双规则）",
+  "category": "sensitive_leak",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-002", "file": "client.go", "line": 3},
+    {"rule_id": "SEC-AST-002", "file": "client.go", "line": 4},
+    {"rule_id": "SEC-AST-001", "file": "client.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

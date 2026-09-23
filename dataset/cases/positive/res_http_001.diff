@@ -1,0 +1,12 @@
+--- a/fetch.go
++++ b/fetch.go
+@@ -1,2 +1,9 @@
+ package fetch
+ 
++func fetch(url string) ([]byte, error) {
++    resp, err := http.Get(url)
++    if err != nil {
++        return nil, err
++    }
++    return io.ReadAll(resp.Body)
++}

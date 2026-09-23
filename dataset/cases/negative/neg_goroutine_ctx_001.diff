@@ -1,0 +1,17 @@
+--- a/server.go
++++ b/server.go
+@@ -1,2 +1,14 @@
+ package server
+ 
++func (s *Server) loop(ctx context.Context, jobs <-chan int) {
++    go func() {
++        for {
++            select {
++            case <-ctx.Done():
++                return
++            case j := <-jobs:
++                s.handle(j)
++            }
++        }
++    }()
++}

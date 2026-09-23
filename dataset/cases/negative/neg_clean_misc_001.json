@@ -1,0 +1,9 @@
+{
+  "id": "neg_clean_misc_001",
+  "description": "普通字符串拼接代码，无任何问题",
+  "category": "none",
+  "difficulty": "easy",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

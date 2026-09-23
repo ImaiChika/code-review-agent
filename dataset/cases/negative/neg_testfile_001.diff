@@ -1,0 +1,10 @@
+--- a/mathutil_test.go
++++ b/mathutil_test.go
+@@ -1,2 +1,7 @@
+ package mathutil
+ 
++func TestAddMetrics(t *testing.T) {
++    if AddMetrics(2, 3) != 5 {
++        t.Fatal("bad")
++    }
++}

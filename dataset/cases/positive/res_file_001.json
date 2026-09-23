@@ -1,0 +1,11 @@
+{
+  "id": "res_file_001",
+  "description": "os.Open 打开文件后没有 Close",
+  "category": "resource",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "RES-AST-001", "file": "store.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

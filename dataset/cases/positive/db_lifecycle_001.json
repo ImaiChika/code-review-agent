@@ -1,0 +1,11 @@
+{
+  "id": "db_lifecycle_001",
+  "description": "db.Query 返回的 rows 没有 Close（数据库生命周期问题）",
+  "category": "lifecycle",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "RES-AST-001", "file": "repo.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

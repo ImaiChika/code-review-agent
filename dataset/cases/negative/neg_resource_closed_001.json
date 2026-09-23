@@ -1,0 +1,9 @@
+{
+  "id": "neg_resource_closed_001",
+  "description": "os.Open 后有 defer f.Close()（资源正确关闭）",
+  "category": "resource",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

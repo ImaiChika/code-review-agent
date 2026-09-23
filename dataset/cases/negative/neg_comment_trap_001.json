@@ -1,0 +1,9 @@
+{
+  "id": "neg_comment_trap_001",
+  "description": "密钥只出现在注释里（文档/TODO），不应报 finding",
+  "category": "security",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

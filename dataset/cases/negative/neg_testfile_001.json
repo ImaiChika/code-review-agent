@@ -1,0 +1,9 @@
+{
+  "id": "neg_testfile_001",
+  "description": "测试文件里的 Fatal/断言不应触发错误处理规则",
+  "category": "testing",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

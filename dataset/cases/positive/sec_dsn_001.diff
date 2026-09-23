@@ -1,0 +1,8 @@
+--- a/db.go
++++ b/db.go
+@@ -1,2 +1,5 @@
+ package db
+ 
++func conn() string {
++    return "postgres://admin:P@ssw0rd2026@db.internal:5432/app"
++}
