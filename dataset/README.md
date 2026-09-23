@@ -2,7 +2,7 @@
 
 > 用于度量 code-review-agent 规则引擎质量的标注数据集 + 评测 harness。
 > 对齐官方验收三项质量指标：**高危检出率 ≥ 80%、误报率 ≤ 15%、敏感信息脱敏 ≥ 95%**。
-> 演进计划见 [ROADMAP.md](../ROADMAP.md)，项目总览见 [PROJECT_GUIDE.md](../PROJECT_GUIDE.md)。
+> 演进计划与指标看板见 [PROJECT_GUIDE.md](../PROJECT_GUIDE.md) §七。
 
 ---
 

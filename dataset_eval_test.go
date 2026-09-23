@@ -9,7 +9,7 @@
 // 输出检出率 / 精确率 / 负样本误报率 / 脱敏泄漏四项指标。
 //
 // 门禁对齐官方验收标准：高危检出率 ≥ 80%，误报率 ≤ 15%，脱敏 0 泄漏。
-// 数据集说明见 dataset/README.md，演进计划见 ROADMAP.md。
+// 数据集说明见 dataset/README.md，演进计划见 PROJECT_GUIDE.md §七。
 package main
 
 import (
@@ -253,7 +253,7 @@ func TestDatasetDetectionQuality(t *testing.T) {
 // TestDatasetRedaction 验证敏感字面量不会以明文出现在 finding/warning evidence 中。
 //
 // 当前引擎存在已知问题 P0-1（SEC-AST-001 的 evidence 未脱敏），
-// 检测到泄漏时本测试 SKIP 并给出计数；修复（ROADMAP M0-A1：统一 Redactor）后
+// 检测到泄漏时本测试 SKIP 并给出计数；修复（PROJECT_GUIDE §七 M0-A1：统一 Redactor）后
 // 泄漏为 0，本测试自动转为硬门禁，无需改代码。
 func TestDatasetRedaction(t *testing.T) {
 	results := loadDataset(t)
@@ -276,7 +276,7 @@ func TestDatasetRedaction(t *testing.T) {
 		for _, l := range leaks {
 			t.Logf("泄漏: %s", l)
 		}
-		t.Skipf("发现 %d 处明文敏感信息泄漏（已知问题 P0-1，见 PROJECT_GUIDE §6 / ROADMAP M0-A1）；修复后本测试自动转为硬门禁", len(leaks))
+		t.Skipf("发现 %d 处明文敏感信息泄漏（已知问题 P0-1，见 PROJECT_GUIDE §6 / §七 M0-A1）；修复后本测试自动转为硬门禁", len(leaks))
 	}
 
 	t.Logf("脱敏检查通过：%d 个 redaction 样本，0 处泄漏", redactionCases)
