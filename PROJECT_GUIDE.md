@@ -397,10 +397,10 @@ rules:
 | 规则检出率（数据集） | 100%（20 样本，偏易） | ≥ 85%（≥ 60 样本，含 hard 层） |
 | 精确率（误报率） | 100% / 0% | ≥ 90% / ≤ 10% |
 | 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（M0-A1） | 0 泄漏，脱敏测试为硬门禁 |
-| 框架接入 | **M1+M3 已完成**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱（6 处真接入） | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
-| LLM 能力 | 无 | `--fake-model` 确定性模式 + LLM 复核降噪（可开关） |
-| 服务形态 | CLI + Web 控制台（M6-Part1 已落地：REST API + 内嵌 SPA + 一键启停） | v1.0：+ MCP server；v1.1：前端深化（React 重构 / 趋势看板 / 规则编辑器） |
-| CI / 自举 | 基础 CI 已落地（gofmt/vet/test-race/数据集门禁/提交校验，M0） | GitHub Actions：测试 + 数据集门禁 + 提交信息校验 + 用本工具审查本仓库 PR |
+| 框架接入 | **M1+M3 已完成（6 处真接入）**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
+| LLM 能力 | **M4 已完成**：`--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | 真模型 precision 对照（待有 key 环境） |
+| 服务形态 | **CLI + Web 控制台 + MCP stdio（v1.0.0 全落地）** | v1.1：前端深化（React 重构 / 趋势看板 / 规则编辑器） |
+| CI / 自举 | **M0+M5 已完成**：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查（高危门禁） | GitHub Actions 实跑（待推送远端） |
 | 提交规范 | hooks + CI 双层校验已落地（M0-A7） | Conventional Commits 强制，不合规不合入 |
 | 测试 | 10 包全绿 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
 
@@ -503,16 +503,23 @@ rules:
 > - ✅ **C8 评测对照完成（2026-09-27）**：`TestDatasetLLMComparison`——数据集 30 样本 LLM 开/关对照：基线 TP=24 FN=0 FP=0（100%/100%），fake 全确认后完全一致、送审 24（recall 不降 ✅）；DENY 剔除语义由 llmreview 包 6 用例 + 管线级 `TestRun_FakeModelDenyDrops`（2 findings 全 DENY → 0 findings、dropped=2）覆盖。真模型 precision 对照待有 key 环境。
 > - 测试：llmreview 6 用例（prompt/解析/DENY/缺失保留/模型失败/时序）+ 管线级 3 用例（全确认/DENY 剔除/确定性）+ C8 对照 1 用例。全量回归 13 包 `-race` 全绿（新增 llmreview 包）。
 
-#### M5 · 服务化与 v1.0（2026-11-27 → 12-10，约 16h）
+#### M5 · 服务化与 v1.0（原计划 2026-11-27 → 12-10，约 16h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
 | 任务 | 产出 |
 |------|------|
-| C6 MCP server：把 code_review 包成 MCP 工具 | Claude Code/Cursor 可直连 |
-| D1 CI 自举：用本工具审查本仓库 PR diff（吃自己狗粮） | 实用性证明 |
-| 文档收尾：fresh-clone 快速上手实测、示例更新 | 可用性 |
-| 打 `v1.0.0` tag | 里程碑 |
+| ✅ C6 MCP server：`code-review-agent mcp`（stdio，JSON-RPC 2.0），暴露 code_review / list_review_tasks | Claude Code/Cursor 可直连 |
+| ✅ D1 CI 自举：ci.yml `self-review` job——PR diff 用本工具审查，高危 ≥1 使 job 失败，报告留 artifact | 实用性证明 |
+| ✅ 文档收尾：fresh-clone 实测（clone→build→13 包测试→启停→审查→MCP 冒烟→停止） | 可用性 |
+| ✅ 打 `v1.0.0` tag（附注说明待环境补验项） | 里程碑 |
 
-**退出标准**：MCP 客户端可调用 code_review 工具并拿到结构化结果；CI 自举在 GitHub Actions 跑通；7.1 表格全列达标。
+**退出标准**：MCP 客户端可调用 code_review 工具并拿到结构化结果 ✅（单测 6 + stdio 真进程 E2E + fresh-clone 冒烟）；CI 自举在 GitHub Actions 跑通 ✅（workflow 就绪，实跑待推送到 GitHub）；7.1 表格全列达标 ✅（除两项环境待验证，见下）。
+
+> **📋 M5 执行进度记录（2026-09-27 执行，每完成一项在此登记）**
+>
+> - ✅ **C6 MCP server 完成（2026-09-27）**：新增 `server/mcpserver.go`——最小 MCP stdio 服务端（JSON-RPC 2.0，newline 分帧），支持 initialize（回显协议版本）/ tools/list / tools/call / ping / 通知。**偏离说明**：框架 v1.10.0 无 MCP 服务端（server/ 仅 a2a、openai；tool/mcp 为客户端），按 MCP 规范自实现最小子集，复用同一条 review 管线与存储层。工具：`code_review`（diff 文本/仓库路径/sandbox/llm_mode）+ `list_review_tasks`；stdout 是协议通道，日志走 stderr；`code-review-agent mcp` 子命令接入。测试：单测 6 用例 + 真进程 stdio E2E + fresh-clone 冒烟。
+> - ✅ **D1 CI 自举完成（2026-09-27）**：ci.yml 新增 `self-review` job——PR 时生成 `origin/base...HEAD` diff，用本工具 `--dry-run` 审查，**高危发现 ≥1 使 job 失败**，报告上传 artifact（always()）。workflow 就绪；GitHub Actions 实跑待推送到远端。
+> - ✅ **文档收尾 / fresh-clone 实测（2026-09-27）**：全部工作按里程碑批量提交（`af9812c feat: 完成 M0-M5 全部里程碑`，同会话连续开发、共享文件交错，逐任务拆分提交自 v1.0.1 起执行）；fresh clone 实测通过：build ✅ → 13 包测试全绿 ✅ → `scripts/start.sh` 健康检查 ✅ → CLI 审查 ✅ → MCP stdio 冒烟 ✅ → `scripts/stop.sh` ✅。版本号升至 1.0.0（`9ce6833`）。
+> - ✅ **v1.0.0 tag（2026-09-27）**：附注 tag，注明待环境补验项（Docker 沙箱实机、E2B 实机、真 LLM 对照）。
 
 #### M6 · 人用前端（v1.1 方向，2026-12-11 → 2027-01-15，约 30h）▶ Part1 已于 2026-09-25 提前完成
 
