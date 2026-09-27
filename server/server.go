@@ -44,7 +44,7 @@ import (
 var webFS embed.FS
 
 // Version 服务版本号。
-const Version = "0.3.0"
+const Version = "1.0.0"
 
 // Config 服务配置。
 type Config struct {
