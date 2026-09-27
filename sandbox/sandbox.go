@@ -91,5 +91,10 @@ func defaultSandboxEnv(env map[string]string) map[string]string {
 	if _, ok := out["GOCACHE"]; !ok {
 		out["GOCACHE"] = "/tmp/.cache/go-build"
 	}
+	// 只读挂载的仓库目录属宿主用户，容器内 git 视为 dubious ownership，
+	// go 的 VCS stamping 会以 exit 128 失败——默认禁用（对分析类命令无副作用）
+	if _, ok := out["GOFLAGS"]; !ok {
+		out["GOFLAGS"] = "-buildvcs=false"
+	}
 	return out
 }

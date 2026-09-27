@@ -23,7 +23,8 @@ package main
 
 func main() {
 	x := 1
-	x = 2 // SA4006: this value of x is never used
+	_ = x    // x 被读取过：编译通过
+	x = 2    // SA4006: this assignment to x is never used
 }
 FIXTURE
 

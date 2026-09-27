@@ -287,3 +287,17 @@ func TestLocalSandbox_RunProgramInfraError(t *testing.T) {
 		t.Errorf("失败时 result 应为 nil，得到 %+v", result)
 	}
 }
+
+// TestDefaultSandboxEnv 容器沙箱 env 默认值（M3：非 root + 只读 rootfs 下 go 工具链可运行）。
+func TestDefaultSandboxEnv(t *testing.T) {
+	// 空输入 → 三个默认值齐备
+	out := defaultSandboxEnv(nil)
+	if out["HOME"] != "/tmp" || out["GOCACHE"] != "/tmp/.cache/go-build" || out["GOFLAGS"] != "-buildvcs=false" {
+		t.Errorf("默认值不符: %v", out)
+	}
+	// 用户显式提供时不覆盖
+	out = defaultSandboxEnv(map[string]string{"HOME": "/custom", "GOCACHE": "/custom-cache", "GOFLAGS": "-v"})
+	if out["HOME"] != "/custom" || out["GOCACHE"] != "/custom-cache" || out["GOFLAGS"] != "-v" {
+		t.Errorf("显式值被覆盖: %v", out)
+	}
+}
