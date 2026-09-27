@@ -94,8 +94,10 @@ func TestLimits_Container_EnvWhitelist(t *testing.T) {
 	}
 	defer sb.Close()
 
+	// 注意：探测变量名不能用 secret= 形态——统一脱敏器会把
+	// "SECRET=<任意值>" 掩成 ***REDACTED***，无法区分泄漏与过滤。
 	res, err := sb.Execute(context.Background(), ExecuteOptions{
-		Command:   `sh -c 'echo "SECRET=${CRA_SECRET:-EMPTY}"'`,
+		Command:   `sh -c 'echo "GOT=[${CRA_SECRET}]"'`,
 		Env:       map[string]string{"CRA_SECRET": "topsecret-2026", "PATH": "/usr/bin:/bin"},
 		Timeout:   30 * time.Second,
 		MaxOutput: 1024,
@@ -104,10 +106,10 @@ func TestLimits_Container_EnvWhitelist(t *testing.T) {
 		t.Fatalf("Execute 失败: %v", err)
 	}
 	if strings.Contains(res.Output, "topsecret-2026") {
-		t.Errorf("非白名单 env 泄漏进容器: %q", res.Output)
+		t.Fatalf("非白名单 env 泄漏进容器: %q", res.Output)
 	}
-	if !strings.Contains(res.Output, "EMPTY") {
-		t.Errorf("白名单外的变量应不可见（期望 EMPTY）, 得到 %q", res.Output)
+	if !strings.Contains(res.Output, "GOT=[]") {
+		t.Errorf("白名单外的变量应不可见（期望 GOT=[]）, 得到 %q", res.Output)
 	}
 }
 
@@ -115,7 +117,7 @@ func TestLimits_Container_EnvWhitelist(t *testing.T) {
 // NetworkMode=none 下外连必须失败。
 func TestLimits_ContainerFX_NetworkIsolation(t *testing.T) {
 	skipWithoutDocker(t)
-	sb, err := NewFrameworkContainerSandbox("")
+	sb, err := NewFrameworkContainerSandbox(t.TempDir())
 	if err != nil {
 		t.Fatalf("创建框架容器沙箱失败: %v", err)
 	}
@@ -138,7 +140,7 @@ func TestLimits_ContainerFX_NetworkIsolation(t *testing.T) {
 // 系统目录不可写。
 func TestLimits_ContainerFX_ReadOnlyRootfs(t *testing.T) {
 	skipWithoutDocker(t)
-	sb, err := NewFrameworkContainerSandbox("")
+	sb, err := NewFrameworkContainerSandbox(t.TempDir())
 	if err != nil {
 		t.Fatalf("创建框架容器沙箱失败: %v", err)
 	}
@@ -160,7 +162,7 @@ func TestLimits_ContainerFX_ReadOnlyRootfs(t *testing.T) {
 // TestLimits_ContainerFX_NonRoot 框架容器后端非 root：uid 非 0。
 func TestLimits_ContainerFX_NonRoot(t *testing.T) {
 	skipWithoutDocker(t)
-	sb, err := NewFrameworkContainerSandbox("")
+	sb, err := NewFrameworkContainerSandbox(t.TempDir())
 	if err != nil {
 		t.Fatalf("创建框架容器沙箱失败: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"trpc.group/trpc-go/trpc-agent-go/codeexecutor"
@@ -41,6 +42,9 @@ type FrameworkContainerSandbox struct {
 //
 // 参数 repoPath 是宿主机仓库路径，将以只读方式挂载到容器 /workspace。
 func NewFrameworkContainerSandbox(repoPath string) (*FrameworkContainerSandbox, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return nil, fmt.Errorf("框架容器沙箱需要仓库路径（bind mount 源）")
+	}
 	if err := checkDockerAvailable(); err != nil {
 		return nil, fmt.Errorf("Docker 不可用: %w", err)
 	}
