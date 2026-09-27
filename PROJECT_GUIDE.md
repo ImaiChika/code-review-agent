@@ -400,7 +400,7 @@ rules:
 | 框架接入 | **M1+M3 已完成（6 处真接入）**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
 | LLM 能力 | **M4 已完成**：`--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | 真模型 precision 对照（待有 key 环境） |
 | 服务形态 | **CLI + Web 控制台 + MCP stdio（v1.0.0 全落地）** | v1.1：前端深化（React 重构 / 趋势看板 / 规则编辑器） |
-| CI / 自举 | **M0+M5 已完成**：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查（高危门禁） | GitHub Actions 实跑（待推送远端） |
+| CI / 自举 | **已落地并在 GitHub Actions 实跑全绿**：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查（首轮即修复 2 个真 bug） | 维持门禁纪律 |
 | 提交规范 | hooks + CI 双层校验已落地（M0-A7） | Conventional Commits 强制，不合规不合入 |
 | 测试 | 10 包全绿 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
 
@@ -467,7 +467,7 @@ rules:
 > - ✅ **evidence_chain 完成（2026-09-27）**：`findings.Finding.EvidenceChain`（json omitempty）+ `BuildEvidenceChain(file, line, ruleID, fact, confidence)` 四步链（hunk→fact→rule→confidence），链中只含定位/事实类型/规则/置信度、**不携带代码内容值**（与统一 Redactor 同一纪律）；12 个产生点全部填充（SEC×3/GOR/RES/ERR×4/TST×2/DB×1）。测试：findings 层 2 用例（结构/JSON 序列化）+ rules 层专项（链 ≥4 步、无明文密钥、含 hunk/rule 步骤）+ 数据集脱敏门禁扩展到 evidence_chain。
 > - ✅ **门禁升级 v1 并达标（2026-09-27）**：门禁阈值 0.80/0.85/0.15 → **0.85/0.90/0.10**。实测（30 样本 = 17 正 + 13 负含 5 hard 陷阱）：**TP=24 FN=0 FP=0，recall 100%、precision 100%、negFPR 0%**，脱敏 0 泄漏（含 evidence_chain 检查）。全量回归 12 包 `-race` 全绿。
 
-#### M3 · 沙箱生产化（原计划 2026-10-30 → 11-12，约 16h）✅ 代码与本地可验证项完成（2026-09-27，Docker/E2B 实机验证待对应环境）
+#### M3 · 沙箱生产化（原计划 2026-10-30 → 11-12，约 16h）✅ 已完成（2026-09-27；Docker 沙箱经 CI 实机验证，仅 E2B 实机待 key）
 
 | 任务 | 产出 |
 |------|------|
@@ -484,7 +484,7 @@ rules:
 > - ✅ **D2 staticcheck 接入完成（2026-09-27）**：沙箱命令列表加 `staticcheck ./...`（镜像内已预装；本地未装则记录失败不影响流程，exit 127 实测）；新增 `review/staticcheck.go`——输出解析为 findings（`STATICCHECK-<code>` 规则 ID、`source: "tool:staticcheck"`、severity low、category **quality**（新分类，不参与评分维度）、confidence 0.95、带证据链），exit 0/1 均解析（1=发现问题），并入去重。测试 3 用例（解析/空输出/汇总）。**报告中出现 staticcheck 发现在有该工具的沙箱环境生效**（本地无 staticcheck，解析逻辑单测覆盖）。
 > - ✅ **沙箱限制测试集完成（2026-09-27）**：新增 `sandbox/limits_test.go` 8 用例——超时/输出截断/env 透传与脱敏兜底（local，PASS）；env 白名单（手写容器）、网络隔离/只读 rootfs/非 root（container-fx），**Docker 不可用时自动 SKIP**（本机 Docker daemon 未运行，4 个容器用例 SKIP）；E2B 无 key 优雅失败（PASS）。
 >
-> **⚠️ M3 退出标准验证状态（如实记录）**：① `--repo-path` 全链路——local 回退路径实测通过；**Docker 沙箱路径待有 Docker daemon 的环境执行**（`docker version` 当前失败，container 用例自动 SKIP）；② E2B 实机验证待 `E2B_API_KEY`；③ staticcheck 出现在报告中——解析与并入链路已实现并单测覆盖，实机输出验证待沙箱镜像环境。
+> **⚠️ M3 退出标准验证状态（更新于推送后）**：① `--repo-path` 全链路 local 路径实测通过；**Docker 沙箱已由 GitHub Actions（ubuntu runner 自带 Docker）实机验证**——沙箱限制测试集在 CI 真跑，**首轮自举即暴露 2 个本地测不到的问题**（env 探测断言被统一脱敏器掩盖、container-fx 空 repoPath 生成非法 bind），修复（`99d699a`）后网络隔离/只读 rootfs/非 root/env 白名单 **4 个容器用例全部 PASS**——CI 自举第一口狗粮就抓到了真 bug；② E2B 实机验证仍待 `E2B_API_KEY`；③ staticcheck 实机输出验证待沙箱镜像环境（解析链路已单测覆盖）。
 
 #### M4 · Agent 升级（原计划 2026-11-13 → 11-26，约 24h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
