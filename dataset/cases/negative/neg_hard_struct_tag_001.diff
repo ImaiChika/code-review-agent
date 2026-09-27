@@ -1,0 +1,10 @@
+--- a/model.go
++++ b/model.go
+@@ -1,2 +1,7 @@
+ package model
+ 
++type User struct {
++    Name     string `json:"name"`
++    Password string `json:"password"`
++    APIKey   string `json:"api_key"`
++}

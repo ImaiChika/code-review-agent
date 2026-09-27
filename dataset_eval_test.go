@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 
 	"code-review-agent/diff"
 	"code-review-agent/findings"
+	"code-review-agent/llmreview"
 	"code-review-agent/rules"
 )
 
@@ -70,6 +72,7 @@ func newEvalEngine() *rules.RuleEngine {
 	engine.Register(rules.NewTokenResourceRule())
 	engine.Register(rules.NewTokenErrorRule())
 	engine.Register(rules.NewTokenMissingTestRule())
+	engine.Register(rules.NewTokenDBLifecycleRule()) // M2-D4
 	return engine
 }
 
@@ -160,10 +163,19 @@ func loadDataset(t *testing.T) []*caseResult {
 					res.leaks = append(res.leaks, ec.ID+": finding "+f.RuleID+" evidence 泄漏敏感字面量")
 					break
 				}
+				// M2：证据链同样不得携带明文（链中只允许定位/事实类型/规则/置信度）
+				if strings.Contains(strings.Join(f.EvidenceChain, " | "), lit) {
+					res.leaks = append(res.leaks, ec.ID+": finding "+f.RuleID+" evidence_chain 泄漏敏感字面量")
+					break
+				}
 			}
 			for _, w := range dedup.Warnings {
 				if strings.Contains(w.Evidence, lit) {
 					res.leaks = append(res.leaks, ec.ID+": warning "+w.RuleID+" evidence 泄漏敏感字面量")
+					break
+				}
+				if strings.Contains(strings.Join(w.EvidenceChain, " | "), lit) {
+					res.leaks = append(res.leaks, ec.ID+": warning "+w.RuleID+" evidence_chain 泄漏敏感字面量")
 					break
 				}
 			}
@@ -178,9 +190,9 @@ func loadDataset(t *testing.T) []*caseResult {
 // TestDatasetDetectionQuality 用数据集度量规则引擎的检出质量。
 //
 // 门禁（对齐官方验收标准）：
-//   - 检出率（recall）≥ 80%
-//   - 精确率（precision）≥ 85%（等价误报率 ≤ 15%）
-//   - 负样本误报率 ≤ 15%
+//   - 检出率（recall）≥ 85%（v1 门禁，M2 升级，基线 80%）
+//   - 精确率（precision）≥ 90%（等价误报率 ≤ 10%，M2 升级，基线 85%）
+//   - 负样本误报率 ≤ 10%（M2 升级，基线 15%）
 func TestDatasetDetectionQuality(t *testing.T) {
 	results := loadDataset(t)
 
@@ -239,14 +251,14 @@ func TestDatasetDetectionQuality(t *testing.T) {
 	t.Logf("warnings:  匹配=%d  漏检=%d", warnTP, warnMissedTotal)
 	t.Logf("负样本:    %d 个中 %d 个被误报（误报率=%.0f%%）", negativeTotal, negativeFlagged, negFPR*100)
 
-	if recall < 0.80 {
-		t.Errorf("检出率 %.0f%% 低于官方门禁 80%%", recall*100)
+	if recall < 0.85 {
+		t.Errorf("检出率 %.0f%% 低于 v1 门禁 85%%", recall*100)
 	}
-	if precision < 0.85 {
-		t.Errorf("精确率 %.0f%% 低于官方门禁（等价误报率 ≤ 15%%）", precision*100)
+	if precision < 0.90 {
+		t.Errorf("精确率 %.0f%% 低于 v1 门禁 90%%（等价误报率 ≤ 10%%）", precision*100)
 	}
-	if negFPR > 0.15 {
-		t.Errorf("负样本误报率 %.0f%% 超过官方门禁 15%%", negFPR*100)
+	if negFPR > 0.10 {
+		t.Errorf("负样本误报率 %.0f%% 超过 v1 门禁 10%%", negFPR*100)
 	}
 }
 
@@ -280,4 +292,69 @@ func TestDatasetRedaction(t *testing.T) {
 	}
 
 	t.Logf("脱敏检查通过：%d 个 redaction 样本，0 处泄漏", redactionCases)
+}
+
+// TestDatasetLLMComparison M4-C8：数据集上 LLM 复核开/关对照。
+//
+// fake 模型默认全 CONFIRM → 指标应与纯规则基线完全一致（recall 不降），
+// 同时验证送审计数 == 基线 findings 总数；剔除机制由 llmreview 包与
+// review 管线测试覆盖（显式入队 DENY 响应）。
+// 真模型（--llm openai）在有 key 的环境复用同一条对照路径。
+func TestDatasetLLMComparison(t *testing.T) {
+	results := loadDataset(t)
+
+	// 基线（LLM 关）与 LLM 开（fake 全确认）两套指标
+	var baseTP, baseFN, baseFP, llmTP, llmFN, llmFP int
+	var reviewedTotal int
+	for _, res := range results {
+		if res.execErr != nil {
+			t.Fatalf("[%s] 样本执行失败: %v", res.tc.ID, res.execErr)
+		}
+
+		// 基线
+		bTP, bFPList, bMissed := matchExpectations(res.tc.ExpectedFindings, res.findings)
+		baseTP += bTP
+		baseFP += len(bFPList)
+		baseFN += len(bMissed)
+
+		// LLM 开（fake 默认全确认）
+		fm := llmreview.NewFakeModel()
+		kept, stats := llmreview.Review(context.Background(), fm, res.findings)
+		reviewedTotal += stats.Reviewed
+		if stats.Error != "" {
+			t.Errorf("[%s] LLM 复核失败: %s", res.tc.ID, stats.Error)
+		}
+		lTP, lFPList, lMissed := matchExpectations(res.tc.ExpectedFindings, kept)
+		llmTP += lTP
+		llmFP += len(lFPList)
+		llmFN += len(lMissed)
+	}
+
+	baseRecall := pct(baseTP, baseTP+baseFN)
+	basePrec := pct(baseTP, baseTP+baseFP)
+	llmRecall := pct(llmTP, llmTP+llmFN)
+	llmPrec := pct(llmTP, llmTP+llmFP)
+
+	t.Logf("基线（LLM 关）: TP=%d FN=%d FP=%d → recall=%.0f%% precision=%.0f%%",
+		baseTP, baseFN, baseFP, baseRecall, basePrec)
+	t.Logf("LLM 开（fake 全确认）: TP=%d FN=%d FP=%d → recall=%.0f%% precision=%.0f%%, 送审=%d",
+		llmTP, llmFN, llmFP, llmRecall, llmPrec, reviewedTotal)
+
+	if llmRecall < baseRecall {
+		t.Errorf("LLM 开启后 recall 下降: %.0f%% < %.0f%%", llmRecall, baseRecall)
+	}
+	if llmPrec < basePrec {
+		t.Errorf("LLM 开启后 precision 下降: %.0f%% < %.0f%%", llmPrec, basePrec)
+	}
+	if reviewedTotal != baseTP {
+		t.Errorf("送审数 %d 应等于基线 findings 总数 %d", reviewedTotal, baseTP)
+	}
+}
+
+// pct 安全百分比。
+func pct(num, den int) float64 {
+	if den == 0 {
+		return 100
+	}
+	return float64(num) / float64(den) * 100
 }

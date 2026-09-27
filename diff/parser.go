@@ -388,6 +388,14 @@ func ReadFromFile(path string) ([]FileDiff, error) {
 	return Parse(f)
 }
 
+// ReadFromContent 解析内存中的 diff 文本（如 HTTP API 上传的内容）。
+func ReadFromContent(content string) ([]FileDiff, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, fmt.Errorf("diff 内容为空")
+	}
+	return Parse(strings.NewReader(content))
+}
+
 // ReadFromGitDiff 在指定仓库目录执行 git diff 并解析输出。
 //
 // 用法：
@@ -417,4 +425,56 @@ func ReadFromGitDiff(repoPath string, args ...string) ([]FileDiff, error) {
 	}
 
 	return Parse(strings.NewReader(string(output)))
+}
+
+// ReadFromFilePaths 把文件路径列表作为输入（M2-D5，第三种输入模式）。
+//
+// 语义：把每个文件的当前内容整体视为"新增行"来审查，
+// 等价于 git diff --no-index /dev/null <file>——适合审查
+// 新文件、或 CI 中只想检查指定文件的场景。
+func ReadFromFilePaths(paths []string) ([]FileDiff, error) {
+	var files []FileDiff
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("读取文件 %s 失败: %w", p, err)
+		}
+		files = append(files, buildWholeFileDiff(p, string(data)))
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("文件列表为空")
+	}
+	return files, nil
+}
+
+// buildWholeFileDiff 把一份完整文件内容构造成"全部新增"的 FileDiff。
+func buildWholeFileDiff(path, content string) FileDiff {
+	fd := FileDiff{
+		OldPath: "/dev/null",
+		NewPath: path,
+	}
+	hunk := Hunk{
+		OldStart: 0,
+		OldLines: 0,
+		NewStart: 1,
+	}
+	lines := strings.Split(content, "\n")
+	// 以 \n 结尾的内容 split 后最后一个元素是空串，不是真实行
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, line := range lines {
+		hunk.Lines = append(hunk.Lines, Line{
+			Type:    LineAdded,
+			Content: line,
+			NewLine: i + 1,
+		})
+	}
+	hunk.NewLines = len(hunk.Lines)
+	fd.Hunks = append(fd.Hunks, hunk)
+	return fd
 }

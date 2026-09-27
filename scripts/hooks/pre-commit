@@ -1,0 +1,16 @@
+#!/bin/sh
+# pre-commit hook：暂存的 Go 文件必须已通过 gofmt（PROJECT_GUIDE §7.7 提交纪律 / M0-A7）
+# 安装：bash scripts/install-hooks.sh
+#
+# 设计取舍：只做 gofmt（毫秒级），vet / 全量测试交给 CI，
+# 避免本地提交被长时间检查阻塞。
+
+status=0
+for f in $(git diff --cached --name-only --diff-filter=ACM -- '*.go'); do
+  if [ -n "$(gofmt -l "$f")" ]; then
+    echo "✗ 未格式化: $f （运行 gofmt -w \"$f\" 后重新 add）" >&2
+    status=1
+  fi
+done
+
+exit $status

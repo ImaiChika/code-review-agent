@@ -69,11 +69,13 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					r.Severity(), r.Category(), r.ID(),
 					"Token 感知：疑似硬编码密钥",
 					fd.NewPath, line.NewLine,
-					content,
+					sanitizeTokenEvidence(content, value),
 					"将密钥移至环境变量或密钥管理服务",
 					0.90,
 					"token:hardcoded_secret",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"sensitive identifier + assignment + string literal", 0.90)
 				result = append(result, *f)
 				continue
 			}
@@ -82,6 +84,11 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 		// 检查 2：非赋值上下文中的敏感信息传递
 		if found, name := analysis.HasSensitiveIdentifier(); found {
 			if !analysis.HasAssignment() {
+				// M2 规则深化：struct tag 行（反引号字面量）不构成敏感信息传递——
+				// `json:"password"` 是字段标签，字段名/tag 键不是密钥。
+				if strings.Contains(content, "`") {
+					continue
+				}
 				strs := analysis.FindStringLiterals()
 				for _, s := range strs {
 					if !isLikelyNotSecret(s) {
@@ -89,11 +96,13 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 							findings.SeverityMedium, r.Category(), r.ID(),
 							"Token 感知：疑似敏感信息传递",
 							fd.NewPath, line.NewLine,
-							content,
+							sanitizeTokenEvidence(content, strings.Trim(s, "\"'`")),
 							"检查 "+name+" 是否包含敏感信息",
 							0.70,
 							"token:sensitive_param",
 						)
+						f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+							"sensitive identifier in non-assignment context", 0.70)
 						result = append(result, *f)
 						break
 					}
@@ -166,6 +175,8 @@ func (r *TokenLeakRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					confidence,
 					"token:sensitive_leak",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"string literal matches known leak pattern", 0.85)
 				result = append(result, *f)
 				break // 一行只报一次
 			}
@@ -291,7 +302,7 @@ func (r *TokenGoroutineRule) Check(fd diff.FileDiff) ([]findings.Finding, error)
 				continue
 			}
 
-			if isOneShotGoroutineToken(lineAnalyses, i) {
+			if isOneShotGoroutineToken(lineAnalyses, i, line.Content) {
 				continue
 			}
 
@@ -304,6 +315,8 @@ func (r *TokenGoroutineRule) Check(fd diff.FileDiff) ([]findings.Finding, error)
 				0.85,
 				"token:goroutine_leak",
 			)
+			f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+				"go statement without exit markers (select/ctx/done)", 0.85)
 			result = append(result, *f)
 		}
 	}
@@ -335,7 +348,16 @@ func hasExitMechanismToken(analyses []analyzer.TokenAnalysis) bool {
 	return false
 }
 
-func isOneShotGoroutineToken(analyses []analyzer.TokenAnalysis, goIndex int) bool {
+// isOneShotGoroutineToken 判断是否为"一次性"goroutine（M2 深化）。
+//
+// M2 深化：一次性排除只适用于闭包立即执行（go func() { ... }()）——
+// 函数体就在 hunk 内，token 层看得到有没有 for 常驻循环；
+// 具名函数调用（go worker(ch)）的函数体不在本次变更中，
+// token 层无法判定是否常驻，保守上报（不排除）。
+func isOneShotGoroutineToken(analyses []analyzer.TokenAnalysis, goIndex int, goLine string) bool {
+	if !isClosureGoroutine(goLine) {
+		return false
+	}
 	for i := goIndex + 1; i < len(analyses); i++ {
 		for _, f := range analyses[i].Facts {
 			if f.Kind == analyzer.FactFor {
@@ -344,6 +366,12 @@ func isOneShotGoroutineToken(analyses []analyzer.TokenAnalysis, goIndex int) boo
 		}
 	}
 	return true
+}
+
+// isClosureGoroutine 判断 go 语句是否为闭包立即执行（go 后紧跟 func 关键字）。
+func isClosureGoroutine(goLine string) bool {
+	trimmed := strings.TrimSpace(goLine)
+	return strings.HasPrefix(strings.TrimPrefix(trimmed, "go "), "func")
 }
 
 // ========== RES-AST-001: Token 感知的资源泄漏检测 ==========
@@ -383,6 +411,16 @@ var resourceOpenCalls = map[string]string{
 func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
 
+	// M2 规则深化：Close 检查范围从"单个 hunk"扩大到"文件全部 hunk 的行"。
+	// 修复跨 hunk 生命周期误报：open 在 hunk1、defer Close 在 hunk2 是合法代码，
+	// 以前按 hunk 局部检查会把这类正常代码误报为资源泄漏。
+	var fileLines []string
+	for _, hunk := range fd.Hunks {
+		for _, line := range hunk.Lines {
+			fileLines = append(fileLines, line.Content)
+		}
+	}
+
 	for _, hunk := range fd.Hunks {
 		var addedLines []string
 		var addedLineNums []int
@@ -397,15 +435,10 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 			continue
 		}
 
-		var allLines []string
-		for _, line := range hunk.Lines {
-			allLines = append(allLines, line.Content)
-		}
-
 		for i, content := range addedLines {
 			for call, closeMethod := range resourceOpenCalls {
 				if strings.Contains(content, call) {
-					if !hasCloseInLines(allLines, closeMethod) {
+					if !hasCloseInLines(fileLines, closeMethod) {
 						f := findings.NewFinding(
 							r.Severity(), r.Category(), r.ID(),
 							"Token 感知：资源可能未关闭",
@@ -415,6 +448,8 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 							0.80,
 							"token:resource_leak",
 						)
+						f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, addedLineNums[i], r.ID(),
+							"open call without matching close in file", 0.80)
 						result = append(result, *f)
 					}
 					break
@@ -507,6 +542,8 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					0.80,
 					"token:error_ignored",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"error return value discarded via blank identifier", 0.80)
 				result = append(result, *f)
 				continue
 			}
@@ -522,6 +559,8 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					0.85,
 					"token:panic_usage",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"panic in non-test library code", 0.85)
 				result = append(result, *f)
 				continue
 			}
@@ -537,6 +576,8 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					0.80,
 					"token:log_fatal",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"log.Fatal in non-main non-test code", 0.80)
 				result = append(result, *f)
 				continue
 			}
@@ -636,7 +677,7 @@ func checkSwallowedErrorToken(filePath string, hunk diff.Hunk) *findings.Finding
 					}
 				}
 				if hasReturn && hasNil {
-					return findings.NewFinding(
+					sw := findings.NewFinding(
 						findings.SeverityLow, findings.CategoryErrorHandling, "ERR-AST-001",
 						"Token 感知：错误被吞没（返回 nil 而非 err）",
 						filePath, line.NewLine,
@@ -645,6 +686,9 @@ func checkSwallowedErrorToken(filePath string, hunk diff.Hunk) *findings.Finding
 						0.75,
 						"token:error_swallowed",
 					)
+					sw.EvidenceChain = findings.BuildEvidenceChain(filePath, line.NewLine, "ERR-AST-001",
+						"if err != nil followed by return nil", 0.75)
+					return sw
 				}
 			}
 
@@ -727,6 +771,8 @@ func (r *TokenMissingTestRule) Check(fd diff.FileDiff) ([]findings.Finding, erro
 				0.65,
 				"token:missing_test",
 			)
+			f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+				"exported function added without matching test", 0.65)
 			result = append(result, *f)
 		}
 	}
@@ -791,6 +837,8 @@ func (r *TokenMissingTestRule) CheckFiles(files []diff.FileDiff) ([]findings.Fin
 					0.65,
 					"token:missing_test",
 				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"exported function added without matching test", 0.65)
 				result = append(result, *f)
 			}
 		}

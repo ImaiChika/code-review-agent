@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard_cross_hunk_close_001",
+  "description": "跨 hunk 生命周期陷阱：open 在 hunk1、defer Close 在 hunk2——Close 检查范围必须覆盖文件全部 hunk，不能只看单个 hunk",
+  "category": "resource",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "hard_goroutine_func_001",
+  "description": "goroutine 泄漏 hard 变体：以普通函数调用（而非闭包）启动 goroutine，hunk 内无任何退出机制",
+  "category": "resource",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "GOR-AST-001", "file": "dispatch.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

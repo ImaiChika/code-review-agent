@@ -1,0 +1,13 @@
+--- a/tx.go
++++ b/tx.go
+@@ -1,2 +1,9 @@
+ package tx
+ 
++func run(db *sql.DB) error {
++    tx, err := db.BeginTx(ctx, nil)
++    if err != nil {
++        return err
++    }
++    defer tx.Rollback()
++    return nil
++}

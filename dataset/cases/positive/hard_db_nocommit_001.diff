@@ -1,0 +1,12 @@
+--- a/store.go
++++ b/store.go
+@@ -1,2 +1,8 @@
+ package store
+ 
++func transfer(db *sql.DB) error {
++    tx, err := db.Begin()
++    if err != nil {
++        return err
++    }
++    return nil
++}

@@ -7,6 +7,7 @@ package diff
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -524,4 +525,55 @@ func TestReadFromFile_NotFound(t *testing.T) {
 // writeFile 辅助函数：写文件。
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// TestReadFromFilePaths 验证文件路径列表输入（M2-D5）：
+// 每个文件整体按"新增行"审查（等价 git diff --no-index /dev/null file）。
+func TestReadFromFilePaths(t *testing.T) {
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "a.go")
+	f2 := filepath.Join(dir, "b.go")
+	if err := os.WriteFile(f1, []byte("package a\n\nvar x = 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f2, []byte("package b\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ReadFromFilePaths([]string{f1, "", f2})
+	if err != nil {
+		t.Fatalf("ReadFromFilePaths 失败: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("应解析 2 个文件（空串跳过）, 得到 %d", len(files))
+	}
+
+	fd := files[0]
+	if fd.NewPath != f1 {
+		t.Errorf("NewPath = %q, 期望 %q", fd.NewPath, f1)
+	}
+	if fd.OldPath != "/dev/null" {
+		t.Errorf("OldPath = %q, 期望 /dev/null", fd.OldPath)
+	}
+	added := fd.AddedLines()
+	if len(added) != 3 {
+		t.Fatalf("3 行内容应全部视为新增, 得到 %d", len(added))
+	}
+	for i, line := range added {
+		if line.Type != LineAdded {
+			t.Errorf("第 %d 行类型 = %v, 期望 LineAdded", i, line.Type)
+		}
+		if line.NewLine != i+1 {
+			t.Errorf("第 %d 行新行号 = %d, 期望 %d", i, line.NewLine, i+1)
+		}
+	}
+}
+
+func TestReadFromFilePaths_Errors(t *testing.T) {
+	if _, err := ReadFromFilePaths(nil); err == nil {
+		t.Error("空列表应报错")
+	}
+	if _, err := ReadFromFilePaths([]string{filepath.Join(t.TempDir(), "no-such.go")}); err == nil {
+		t.Error("不存在的文件应报错")
+	}
 }

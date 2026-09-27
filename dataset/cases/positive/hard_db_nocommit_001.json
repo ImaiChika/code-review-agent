@@ -1,0 +1,11 @@
+{
+  "id": "hard_db_nocommit_001",
+  "description": "DB 生命周期：事务开启后本次变更内没有任何 Commit/Rollback 路径（M2-D4 新规则的正样本）",
+  "category": "lifecycle",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "DB-AST-001", "file": "store.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

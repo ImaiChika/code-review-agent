@@ -1,0 +1,86 @@
+# CI 门禁（PROJECT_GUIDE §7.2 M0 / §7.3 A7+D1 前半）
+#
+# 纪律：任何一项红了不合入。数据集质量门禁包含在 go test 全量运行中
+# （TestDataset*），脱敏 0 泄漏在 M0-A1 之后已转为硬门禁。
+#
+# 自举（D1）：PR diff 用本工具审查——吃自己的狗粮；
+# 高危发现使 job 失败，报告作为 artifact 留存。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: gofmt / vet / test-race（含数据集门禁）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt 检查
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: 全量测试（-race，含数据集质量门禁）
+        run: go test ./... -count=1 -race -timeout 10m -v
+
+  commit-check:
+    name: 提交信息 Conventional Commits 校验
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 校验 PR 中的所有提交信息
+        run: scripts/check_commits.sh "origin/${{ github.base_ref }}..HEAD"
+
+  self-review:
+    name: CI 自举（本工具审查本仓库 PR diff）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: 生成 PR diff
+        run: git diff "origin/${{ github.base_ref }}...HEAD" > pr.diff
+
+      - name: 自举审查（--dry-run，不落库）
+        run: |
+          go build -o code-review-agent .
+          ./code-review-agent --diff-file pr.diff --dry-run --output self-review --verbose
+
+      - name: 高危门禁（高危 ≥1 则失败）
+        run: |
+          count=$(python3 -c "import json; print(json.load(open('self-review/review_report.json'))['summary']['by_severity'].get('high', 0))")
+          echo "高危发现: $count"
+          test "$count" -eq 0 || { echo "❌ 自举审查发现高危问题，详见 artifact 报告"; exit 1; }
+
+      - name: 上传审查报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-review-report
+          path: self-review/

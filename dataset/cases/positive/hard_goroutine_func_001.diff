@@ -1,0 +1,8 @@
+--- a/dispatch.go
++++ b/dispatch.go
+@@ -1,2 +1,5 @@
+ package dispatch
+ 
++func dispatch(ch chan Job) {
++    go worker(ch)
++}

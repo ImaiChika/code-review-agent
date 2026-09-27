@@ -1,0 +1,12 @@
+--- a/order.go
++++ b/order.go
+@@ -1,2 +1,9 @@
+ package order
+ 
++func place(db *sql.DB) error {
++    tx, err := db.Begin()
++    if err != nil {
++        return err
++    }
++    return tx.Commit()
++}

@@ -1,0 +1,11 @@
+{
+  "id": "hard_err_swallow_ctx_001",
+  "description": "错误吞没 hard 变体：if err != nil 分支返回 nil，且上下文带有正常返回路径（上报行号为 if 行）",
+  "category": "error_handling",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "ERR-AST-001", "file": "handler.go", "line": 5}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

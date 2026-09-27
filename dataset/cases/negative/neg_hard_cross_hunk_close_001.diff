@@ -1,0 +1,16 @@
+--- a/worker.go
++++ b/worker.go
+@@ -1,2 +1,6 @@
+ package worker
+ 
++func process(path string) error {
++    f, err := os.Open(path)
++    if err != nil {
++        return err
++    }
+@@ -8,2 +12,6 @@
+     }
++    defer f.Close()
++    data := read(f)
++    return parse(data)
++}

@@ -34,6 +34,7 @@ func TestIntegration_AllFixtures(t *testing.T) {
 	engine.Register(rules.NewTokenResourceRule())
 	engine.Register(rules.NewTokenErrorRule())
 	engine.Register(rules.NewTokenMissingTestRule())
+	engine.Register(rules.NewTokenDBLifecycleRule()) // M2-D4
 
 	for _, fixture := range fixtures {
 		name := filepath.Base(fixture)

@@ -1,0 +1,12 @@
+--- a/handler.go
++++ b/handler.go
+@@ -1,2 +1,8 @@
+ package handler
+ 
++func handle(r io.Reader) error {
++    data, err := decode(r)
++    if err != nil {
++        return nil
++    }
++    return process(data)
++}

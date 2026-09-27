@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard_generated_file_001",
+  "description": "生成文件排除陷阱：.pb.go 生成文件（Code generated DO NOT EDIT 头）内嵌的测试向量/端点常量不应作为泄漏上报",
+  "category": "security",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": ["ghs_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"]
+}

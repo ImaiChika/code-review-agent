@@ -60,6 +60,15 @@ var dimensions = []struct {
 
 // ========== 评分函数 ==========
 
+// Dimensions 返回评分维度定义（名称 + 权重），供 API / 前端展示评分业务逻辑。
+func Dimensions() []Dimension {
+	dims := make([]Dimension, 0, len(dimensions))
+	for _, d := range dimensions {
+		dims = append(dims, Dimension{Name: d.Name, Weight: d.Weight})
+	}
+	return dims
+}
+
 // Calculate 根据 findings 列表计算风险评分。
 func Calculate(findingsList []findings.Finding, warnings []findings.Finding) RiskScore {
 	result := RiskScore{

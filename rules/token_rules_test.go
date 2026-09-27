@@ -590,3 +590,51 @@ func TestIsLikelyNotSecret(t *testing.T) {
 		}
 	}
 }
+
+// TestEvidenceChain_NoSecret M2 证据链专项：所有 finding 的链非空且不含明文密钥。
+func TestEvidenceChain_NoSecret(t *testing.T) {
+	secret := "AKIAIOSFODNN7EXAMPLE"
+	diffText := `--- a/auth.go
++++ b/auth.go
+@@ -1,2 +1,6 @@
+ package auth
+
++func loadCred() {
++    cred := "AKIAIOSFODNN7EXAMPLE"
++    cfg.APIKey = cred
++}
+`
+	files, err := diff.ReadFromContent(diffText)
+	if err != nil {
+		t.Fatalf("解析 diff 失败: %v", err)
+	}
+
+	engine := NewEngine()
+	engine.Register(NewTokenSecretRule())
+	engine.Register(NewTokenLeakRule())
+	engine.Register(NewTokenGoroutineRule())
+	engine.Register(NewTokenResourceRule())
+	engine.Register(NewTokenErrorRule())
+	engine.Register(NewTokenMissingTestRule())
+	engine.Register(NewTokenDBLifecycleRule())
+
+	raw, err := engine.Run(files)
+	if err != nil {
+		t.Fatalf("引擎执行失败: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("样本应产生 findings")
+	}
+	for _, f := range raw {
+		if len(f.EvidenceChain) < 4 {
+			t.Errorf("%s 证据链应 ≥4 步（hunk→fact→rule→confidence）, 得到 %d", f.RuleID, len(f.EvidenceChain))
+		}
+		joined := strings.Join(f.EvidenceChain, " | ")
+		if strings.Contains(joined, secret) {
+			t.Errorf("%s 证据链泄漏明文密钥: %s", f.RuleID, joined)
+		}
+		if !strings.Contains(joined, "hunk: ") || !strings.Contains(joined, "rule: ") {
+			t.Errorf("%s 证据链缺少 hunk/rule 步骤: %s", f.RuleID, joined)
+		}
+	}
+}

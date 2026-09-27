@@ -78,18 +78,26 @@ func (s *LocalSandbox) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	}
 
 	// 构建执行参数
-	// 使用 sh -c 包装命令，支持管道、重定向等 shell 特性
+	// 使用 sh -c 包装命令，支持管道、重定向等 shell 特性。
+	// Cwd 必须是相对 workspace 的路径：框架内部做 filepath.Join(ws.Path, spec.Cwd)，
+	// 传 "." 表示就在 workspace 根目录（即 opts.WorkDir）执行；
+	// 若传绝对路径会被再拼一层，命令会跑进错误的嵌套目录。
 	spec := codeexecutor.RunProgramSpec{
 		Cmd:     "sh",
 		Args:    []string{"-c", opts.Command},
-		Cwd:     ws.Path,
+		Cwd:     ".",
 		Env:     opts.Env,
 		Timeout: opts.Timeout,
 	}
 
 	// 使用框架的 Runtime 执行
 	start := time.Now()
-	runResult, _ := s.runtime.RunProgram(timeoutCtx, ws, spec)
+	runResult, runErr := s.runtime.RunProgram(timeoutCtx, ws, spec)
+	if runErr != nil {
+		// 基础设施失败（工作目录创建失败、命令无法启动等）：
+		// 框架只在 cmd.Run 之前出错时返回 error，命令的退出码/超时都在 RunResult 里。
+		return nil, fmt.Errorf("本地沙箱执行失败: %w", runErr)
+	}
 	duration := time.Since(start)
 
 	result := &ExecuteResult{

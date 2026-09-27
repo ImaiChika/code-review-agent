@@ -53,6 +53,9 @@ type Store interface {
 	SaveArtifact(artifact *Artifact) error
 	GetArtifacts(taskID string) ([]*Artifact, error)
 
+	// 聚合统计
+	GetFindingStats() (*FindingStats, error)
+
 	// 生命周期
 	Close() error
 }
@@ -113,6 +116,20 @@ type Artifact struct {
 	Content      string    `json:"content"`
 	Size         int       `json:"size"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// RuleCount 单条规则的命中次数（统计用）。
+type RuleCount struct {
+	RuleID string `json:"rule_id"`
+	Count  int    `json:"count"`
+}
+
+// FindingStats 全库 findings 聚合统计（总览页 / GET /api/stats 用）。
+type FindingStats struct {
+	Total      int            `json:"total"`
+	BySeverity map[string]int `json:"by_severity"`
+	ByCategory map[string]int `json:"by_category"`
+	TopRules   []RuleCount    `json:"top_rules"`
 }
 
 // ========== 实现 ==========
@@ -626,4 +643,62 @@ func (s *SQLiteStore) GetArtifacts(taskID string) ([]*Artifact, error) {
 		artifacts = append(artifacts, &a)
 	}
 	return artifacts, nil
+}
+
+// GetFindingStats 返回全库 findings 聚合统计（按严重级别/分类/规则 TopN）。
+func (s *SQLiteStore) GetFindingStats() (*FindingStats, error) {
+	stats := &FindingStats{
+		BySeverity: make(map[string]int),
+		ByCategory: make(map[string]int),
+	}
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM cr_findings`).Scan(&stats.Total); err != nil {
+		return nil, fmt.Errorf("统计 findings 总数失败: %w", err)
+	}
+
+	rows, err := s.db.Query(`SELECT severity, COUNT(*) FROM cr_findings GROUP BY severity`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		stats.BySeverity[k] = n
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(`SELECT category, COUNT(*) FROM cr_findings GROUP BY category`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		stats.ByCategory[k] = n
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(
+		`SELECT rule_id, COUNT(*) AS n FROM cr_findings GROUP BY rule_id ORDER BY n DESC LIMIT 10`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rc RuleCount
+		if err := rows.Scan(&rc.RuleID, &rc.Count); err != nil {
+			return nil, err
+		}
+		stats.TopRules = append(stats.TopRules, rc)
+	}
+
+	return stats, nil
 }

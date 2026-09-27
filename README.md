@@ -15,7 +15,19 @@
 
 ## 快速开始
 
-### 安装
+### Web 控制台（推荐体验）
+
+```bash
+scripts/start.sh             # 一键启动，默认 http://localhost:8080
+scripts/stop.sh              # 一键关闭
+PORT=9090 scripts/start.sh   # 自定义端口
+```
+
+浏览器打开 <http://localhost:8080>：**总览看板**（统计/风险分布/评分权重/业务管线）、**新建审查**（粘贴 diff 或一键载入内置示例，实时出结果）、**任务记录**（历史档案，含 findings 证据、沙箱执行、权限决策）、**规则引擎**（内置规则 + YAML DSL 展示）。
+
+服务与 CLI 共用同一套审查管线（`review` 包），看到的即真实业务逻辑；前端内嵌在二进制里（go:embed），单文件部署、无外部依赖。
+
+### 安装与 CLI
 
 ```bash
 go build -o code-review-agent .
@@ -27,8 +39,14 @@ go build -o code-review-agent .
 # 审查 diff 文件
 ./code-review-agent --diff-file changes.diff
 
+# 审查文件路径列表（M2-D5：整体按新增行审查，适合新文件/CI 指定文件）
+./code-review-agent --files "a.go,b.go"
+
 # 审查 git 仓库变更
 ./code-review-agent --repo-path /path/to/repo
+
+# 启动 HTTP 服务（Web 前端 + REST API，等价于 scripts/start.sh）
+./code-review-agent serve --port 8080
 
 # dry-run 模式（不写数据库）
 ./code-review-agent --diff-file changes.diff --dry-run
@@ -51,7 +69,11 @@ go build -o code-review-agent .
 | `--repo-path` | - | git 仓库路径 |
 | `--rules-dir` | - | 自定义 YAML 规则目录 |
 | `--db` | `review.db` | SQLite 数据库路径 |
-| `--output` | `.` | 报告输出目录 |
+| `--output` | `.` | 报告输出目录（不存在会自动创建） |
+| `--sandbox` | `container` | 沙箱模式：`container`（手写 docker run）/ `container-fx`（框架 Docker SDK）/ `e2b`（云沙箱，需 `E2B_API_KEY`）/ `local`（仅 `--repo-path` 且非 dry-run 时执行；失败自动回退） |
+| `--audit-file` | `tool_safety_audit.jsonl` | 安全审计日志 JSONL 路径（纯文件名落在 `--output` 目录下，传空禁用） |
+| `--fake-model` | false | 内置确定性假模型 LLM 复核（M4-C2：无 API Key 全链路可复现） |
+| `--llm` | - | LLM 复核降噪（M4-C1）：`openai`（兼容 API；配 `--llm-model`、`--llm-base-url` 可指向 ollama/vLLM，需 `OPENAI_API_KEY`；DENY 剔除候选降误报） |
 | `--dry-run` | false | 不写数据库 |
 | `--verbose` | false | 详细输出 |
 
@@ -59,7 +81,10 @@ go build -o code-review-agent .
 
 ```
 code-review-agent/
-├── main.go              # CLI 入口
+├── main.go              # CLI 入口 + serve 子命令（薄壳）
+├── review/              # 审查管线（8 步流程，CLI 与 API 共用）
+├── server/              # HTTP 服务：REST API + 内嵌 Web 前端（web/）
+├── scripts/             # start.sh / stop.sh 一键启停、提交规范脚本
 ├── analyzer/            # Go AST + Token 分析器
 │   ├── analyzer.go      # go/ast 完整文件分析
 │   └── token.go         # go/scanner 逐行分析
@@ -100,6 +125,7 @@ code-review-agent/
 | RES-AST-001 | Token 感知的资源泄漏 | 未关闭的文件、连接、HTTP 响应 |
 | ERR-AST-001 | Token 感知的错误处理 | 忽略 error、panic、log.Fatal |
 | TST-AST-001 | Token 感知的测试缺失 | 新增导出函数无测试 |
+| DB-AST-001 | DB 事务生命周期（M2-D4） | Begin/BeginTx 后无 Commit/Rollback 配对 |
 
 ## YAML 自定义规则
 
@@ -161,6 +187,10 @@ go test ./analyzer/ -v
 # 运行验收测试
 go test ./... -count=1 -timeout 60s
 ```
+
+## 开发
+
+提交规范（Conventional Commits）、本地 Git 钩子与 CI 门禁说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。克隆后执行一次 `bash scripts/install-hooks.sh` 安装本地钩子。
 
 ## License
 

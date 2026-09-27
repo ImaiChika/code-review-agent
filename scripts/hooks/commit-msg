@@ -1,0 +1,35 @@
+#!/bin/sh
+# commit-msg hook：校验提交信息符合 Conventional Commits（PROJECT_GUIDE §7.7 提交纪律 / M0-A7）
+# 安装：bash scripts/install-hooks.sh
+#
+# 合法格式：type(scope): subject
+# type ∈ feat fix docs style refactor perf test build ci chore revert
+# scope 可选；subject 必填。Merge / Revert 开头的 git 生成信息放行。
+
+msgfile="$1"
+[ -f "$msgfile" ] || { echo "commit-msg: 找不到提交信息文件 $msgfile" >&2; exit 1; }
+
+first_line=$(head -n 1 "$msgfile")
+
+case "$first_line" in
+  Merge\ *|Revert\ *) exit 0 ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([A-Za-z0-9._/-]+\))?!?: .+'
+if ! printf '%s\n' "$first_line" | grep -qE "$pattern"; then
+  cat >&2 <<EOF
+✗ 提交信息不符合 Conventional Commits 规范：
+    "$first_line"
+
+  合法格式:  type(scope): subject
+  type:      feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert
+  示例:      fix(A1): unify evidence redaction
+             feat: add --audit-file flag
+             docs: update PROJECT_GUIDE roadmap
+
+  规范详见 CONTRIBUTING.md（本地校验由 scripts/install-hooks.sh 安装）。
+EOF
+  exit 1
+fi
+
+exit 0

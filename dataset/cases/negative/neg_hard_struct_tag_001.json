@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard_struct_tag_001",
+  "description": "struct tag 陷阱：字段名与 tag 含 password/api_key 字样，但没有任何密钥字面量赋值——敏感标识符 + 反引号 tag 不构成泄漏证据",
+  "category": "security",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CR//AGENT — 代码审查控制台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="frame">
+  <!-- ══════════ 侧边栏 ══════════ -->
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">CR//AGENT</div>
+      <div class="brand-sub">代码审查控制台</div>
+    </div>
+
+    <nav class="nav">
+      <a href="#/dashboard" data-nav="dashboard"><span class="nav-key">01</span>总览看板</a>
+      <a href="#/review" data-nav="review"><span class="nav-key">02</span>新建审查</a>
+      <a href="#/tasks" data-nav="tasks"><span class="nav-key">03</span>任务记录</a>
+      <a href="#/rules" data-nav="rules"><span class="nav-key">04</span>规则引擎</a>
+    </nav>
+
+    <div class="side-foot">
+      <div class="foot-row"><span class="k">状态</span><span class="v" id="foot-status">●</span></div>
+      <div class="foot-row"><span class="k">版本</span><span class="v" id="foot-version">—</span></div>
+    </div>
+  </aside>
+
+  <!-- ══════════ 主区 ══════════ -->
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb" id="crumb">~/code-review-agent</div>
+      <div class="topbar-right" id="topbar-meta"></div>
+    </header>
+
+    <section class="view" id="view">
+      <div class="boot"><span class="spin"></span></div>
+    </section>
+
+    <footer class="statusline" id="statusline">就绪</footer>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

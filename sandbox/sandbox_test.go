@@ -7,6 +7,9 @@ package sandbox
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,3 +219,71 @@ func TestValidate(t *testing.T) {
 
 // 注意：脱敏逻辑已移至 safety/mask.go，测试在 safety 包中。
 // 这里只测试沙箱执行是否正确调用了脱敏。
+
+// TestLocalSandbox_WorkDirIsExact 验证命令必须在指定的 WorkDir 中执行（M0-A3）。
+// 框架内部做 filepath.Join(ws.Path, spec.Cwd)，Cwd 必须传 workspace 相对路径，
+// 否则绝对路径会被再拼一层，命令跑进错误的嵌套目录。
+func TestLocalSandbox_WorkDirIsExact(t *testing.T) {
+	sb, _ := NewLocalSandbox("")
+	defer sb.Close()
+
+	tmpDir := t.TempDir()
+	opts := ExecuteOptions{
+		Command:   "pwd",
+		WorkDir:   tmpDir,
+		Timeout:   5 * time.Second,
+		MaxOutput: 1024,
+	}
+
+	result, err := sb.Execute(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Execute 失败: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, 期望 0", result.ExitCode)
+	}
+
+	// getcwd 返回物理路径（macOS 下 /var 是 /private/var 的符号链接），归一化后比较
+	got := strings.TrimSpace(result.Output)
+	wantReal, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(tmpDir) 失败: %v", err)
+	}
+	gotReal, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q) 失败: %v", got, err)
+	}
+	if gotReal != wantReal {
+		t.Errorf("命令实际执行目录 = %q, 期望 %q", gotReal, wantReal)
+	}
+}
+
+// TestLocalSandbox_RunProgramInfraError 验证基础设施失败时 Execute 返回错误
+// 而不是被吞成"退出码非 0"（M0-A3，修 P1-4）。
+func TestLocalSandbox_RunProgramInfraError(t *testing.T) {
+	sb, _ := NewLocalSandbox("")
+	defer sb.Close()
+
+	// WorkDir 位于一个普通文件之下，框架 MkdirAll 必然失败
+	base := t.TempDir()
+	blocker := filepath.Join(base, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+	badDir := filepath.Join(blocker, "inner")
+
+	opts := ExecuteOptions{
+		Command:   "pwd",
+		WorkDir:   badDir,
+		Timeout:   5 * time.Second,
+		MaxOutput: 1024,
+	}
+
+	result, err := sb.Execute(context.Background(), opts)
+	if err == nil {
+		t.Fatalf("基础设施失败应返回错误，却得到了 result: %+v", result)
+	}
+	if result != nil {
+		t.Errorf("失败时 result 应为 nil，得到 %+v", result)
+	}
+}

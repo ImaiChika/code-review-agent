@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard_db_commit_001",
+  "description": "DB 生命周期配对陷阱：Begin 与 Commit 同在本次变更的新增行中——配对完整，不得上报",
+  "category": "lifecycle",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

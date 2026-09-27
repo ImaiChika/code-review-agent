@@ -26,6 +26,7 @@ out/
 runs/
 Users/
 work/
+.run/
 
 # === IDE / 编辑器 ===
 .idea/

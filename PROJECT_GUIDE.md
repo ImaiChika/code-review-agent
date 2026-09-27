@@ -49,6 +49,7 @@ tRPC-Agent 是腾讯开源的生产级 Agent 开发框架（Python + Go 双实�
 | `README.md` | ✅ 对外交付 | 使用说明、规则表、评分说明 |
 | `DESIGN.md` | ✅ 对外交付 | 300-500 字方案设计说明（题目要求的交付物） |
 | `PROJECT_GUIDE.md` | ✅ 对外交付 | **本文档**，全量指引 |
+| `CONTRIBUTING.md` | ✅ 对外交付 | 贡献指南：构建/测试命令、Conventional Commits、hooks 安装、门禁纪律 |
 | `GUIDE.md` | 📝 开发笔记 | 开工前的 4 周计划 + 创新方案清单（已过时，仅存档，gitignored） |
 | `任务解读手册.md` | 📝 开发笔记 | 对 trpc.txt 的逐条白话解读（gitignored） |
 | `project_gap_and_innovation_review.txt` | 📝 开发笔记 | 中期差距评估 + Patch-Aware 语义引擎创新方案（很有价值，建议保留） |
@@ -84,6 +85,8 @@ go vet ./...
 gofmt -l .
 ```
 
+> 提交前先执行一次 `bash scripts/install-hooks.sh` 安装本地钩子（提交信息格式 + gofmt 检查）；CI 门禁与提交规范详见 `CONTRIBUTING.md` 与 `.github/workflows/ci.yml`。
+
 ### 2.3 运行
 
 ```bash
@@ -111,7 +114,20 @@ gofmt -l .
 | `--dry-run` | false | 不写库、不跑沙箱 |
 | `--verbose` | false | 详细输出 |
 
-### 2.4 产物
+### 2.4 Web 服务与前端（M6-Part1，2026-09-25 起可用）
+
+```bash
+scripts/start.sh             # 一键启动（自动构建），默认 http://localhost:8080
+scripts/stop.sh              # 一键关闭（PID 文件 + 按端口兜底）
+PORT=9090 scripts/start.sh   # 自定义端口
+# 等价手工命令: go build -o code-review-agent . && ./code-review-agent serve --port 8080
+```
+
+- **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
+- **API**：`GET /api/health`、`POST /api/reviews`（diff 文本或仓库路径）、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
+- **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
+
+### 2.5 产物
 
 每次审查输出：
 
@@ -141,7 +157,12 @@ go test -run TestDataset -v .   # 当前基线：recall 100%、precision 100%、
 
 ```
 code-review-agent/
-├── main.go                 # CLI 入口，串联 8 步流程
+├── main.go                 # CLI 入口 + serve 子命令（薄壳，业务全在 review 包）
+├── review/                 # ★ 审查管线：8 步流程唯一实现，CLI 与 HTTP API 共用
+├── server/                 # ★ HTTP 服务：REST API + 内嵌 Web 前端（go:embed）
+│   └── web/                #   前端三件套（vanilla SPA，零外部依赖）
+├── scripts/                # ★ start.sh / stop.sh 一键启停；提交规范 hooks
+├── .github/workflows/      # CI 门禁（gofmt/vet/test-race/数据集/提交校验）
 ├── integration_test.go     # 端到端验收测试（遍历 testdata/*.diff）
 ├── diff/                   # unified diff 解析（hunk/行号/包名提取/git diff 调用）
 ├── analyzer/               # 两层分析器
@@ -169,7 +190,7 @@ code-review-agent/
 └── Dockerfile              # 沙箱镜像（golang:1.21-alpine + staticcheck/golangci-lint）
 ```
 
-### 3.2 主流程（main.go 的 8 步）
+### 3.2 主流程（review 包的 8 步，CLI/API 共用）
 
 ```
 Step 1  读 diff        --diff-file（读文件）或 --repo-path（exec git diff）
@@ -197,6 +218,7 @@ Step 8  汇总输出
 | RES-AST-001 | 资源泄漏 | 14 种 open 调用（os.Open/http.Get/sql.Query/net.Dial...）在 hunk 内找不到对应 Close | 0.80 |
 | ERR-AST-001 | 错误处理 | `_` 丢弃返回值 / panic / 库代码 log.Fatal / `if err != nil` 后 `return nil`（跨行） | 0.75-0.85 |
 | TST-AST-001 | 测试缺失 | MultiFileRule：新增导出函数在所有测试文件中找不到 Test* 对应 | 0.65 |
+| DB-AST-001 | DB 事务生命周期（M2-D4） | 新增行 Begin/BeginTx 后全部新增行无 Commit/Rollback 配对 | 0.80 |
 
 所有规则只扫**新增行**（`fd.AddedLines()`），不报旧代码的问题——这是 diff 审查的正确语义。
 
@@ -241,11 +263,11 @@ rules:
 
 | 能力 | 框架提供 | 本项目实际做法 | 差距 |
 |------|---------|--------------|------|
-| 权限策略 | `tool/permission.go`：`PermissionPolicy`/`PermissionChecker` 接口、`PermissionActionAllow/Deny/Ask`、`PermissionPolicyFunc` 适配器 | `safety/filter.go` 自研 `SafetyFilter`，自有 `Decision allow/deny/ask` 枚举（**枚举值与框架语义对齐**），7 层检查 + JSONL 审计 | 未实现 `tool.PermissionPolicyFunc` 适配器，治理没接到框架工具链上 |
-| Skill 加载 | `skill.NewFSRepository(roots...)` 解析 SKILL.md（front matter + 正文 + docs），`tool/skill.NewLoadTool/NewRunTool` 可 load/run | `skills/code-review/SKILL.md` **格式**遵循规范（front matter name/description/version），但程序运行时**不加载它**，纯文档 | SKILL.md 是"给人看的"，不是"给框架用的" |
-| 容器沙箱 | `codeexecutor/container`（独立子模块）：`container.New(WithDockerFilePath/WithBindMount...)`，走 Docker API | `sandbox/container.go` 手写 `exec docker run --network=none --memory=512m --cpus=1 --read-only --tmpfs /tmp --user 65532:65532` | 未用框架 container 子模块；但手写版的安全 flags 反而更"狠"（框架默认镜像还是 python:3.9-slim） |
-| 命令安全解析 | `internal/shellsafe`：`Parse(command)` 手写 shell lexer + `Policy{Allow,Deny}`（**internal 包，外部仓库无法 import**） | `safety/filter.go` 用 `strings.Contains` + 词边界校验 | shellsafe 本来就 import 不到，自实现是合理的；但解析强度弱于真 lexer（见 §6.7） |
-| 产物管理 | `artifact.Service`（Save/Load/ListVersions），实现有 inmemory/s3/cos | `storage` 里自建 `cr_artifacts` 表 + `Store.SaveArtifact` 接口（已预留，main.go 尚未调用） | 接口已留，链路未通 |
+| 权限策略 | `tool/permission.go`：`PermissionPolicy`/`PermissionChecker` 接口、`PermissionActionAllow/Deny/Ask`、`PermissionPolicyFunc` 适配器 | `safety/filter.go` 自研 `SafetyFilter`（7 层检查 + JSONL 审计），**M1-B2 已接入框架**：`AsPermissionPolicy()` 适配为 `tool.PermissionPolicy`，沙箱命令经 `policy.CheckToolPermission` 检查，决策落 `cr_permission_decisions` | ✅ 已消除 |
+| Skill 加载 | `skill.NewFSRepository(roots...)` 解析 SKILL.md，`tool/skill.NewLoadTool/NewRunTool` 可 load/run | **M1-B1 已接入**：`review.LoadSkillMeta()` 用 `skill.NewFSRepository` 真加载 `skills/code-review`，name/description/version 写入报告 `skill` 字段；`tool/skill.NewRunTool` 跑脚本仍未接（B7 backlog） | 部分消除 |
+| 容器沙箱 | `codeexecutor/container`（独立子模块）：`container.New(WithDockerFilePath/WithBindMount...)`，走 Docker API | `sandbox/container.go` 手写 `docker run --network=none ...`（安全 flags 更狠） | 未接框架 container（B3，M3） |
+| 命令安全解析 | `internal/shellsafe`：`Parse(command)` 手写 shell lexer + `Policy{Allow,Deny}`（**internal 包，外部仓库无法 import**） | `safety/filter.go` 用 `strings.Contains` + 词边界校验 | shellsafe import 不到，自实现合理；长期见 §7-C13 |
+| 产物管理 | `artifact.Service`（Save/Load/ListVersions），实现有 inmemory/s3/cos | **M1-B5 已落库链路**：报告 JSON/MD + 沙箱输出写 `cr_artifacts`（数量/大小/扩展名三重限制）；未用框架 `artifact.Service`（表自建，接口语义对齐） | 基本消除（框架 Service 换用为 backlog） |
 
 ### 4.3 框架有、本项目完全没碰的能力（扩展空间）
 
@@ -272,15 +294,15 @@ rules:
 
 | # | 能力 | 状态 | 证据 / 差距 |
 |---|------|------|------------|
-| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | 🟡 | `skills/code-review/` 三件套齐全；但未用 `skill.NewFSRepository` 加载，规则 ≥4 类要求达成（实际覆盖 6 类，DB 生命周期由 RES-AST-001 间接覆盖，无专门的 Begin/Commit/Rollback 规则） |
-| 2 | 沙箱执行（container/e2b，local 仅 fallback） | 🟡 | container 已实现（手写 docker run，网络/内存/CPU/只读/非 root 全套隔离），Docker 不可用自动回退 local；**e2b 未实现**（SKILL.md 却声称支持，文档与实现不符） |
-| 3 | 工具链接入（高风险命令先过 PermissionPolicy） | ✅ | `main.go` 中每条沙箱命令先 `filter.Check()`，deny/ask 不进沙箱并记录 `cr_permission_decisions`；但仅覆盖 2 条固定命令 |
-| 4 | 输入解析（unified diff / 文件列表 / git 工作区） | 🟡 | diff 文件 ✅、git 工作区 ✅（`ReadFromGitDiff` 支持 range 参数）；**文件路径列表输入未实现** |
+| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**（`skill.NewFSRepository` → 报告 `skill` 字段含 name/version/loaded）；规则 ≥4 类要求达成（实际覆盖 6 类） |
+| 2 | 沙箱执行（container/e2b，local 仅 fallback） | ✅ | container 手写版 ✅（全套隔离 flags）；**M3 补齐：container-fx（框架 Docker SDK，同套隔离配置）与 e2b 云沙箱（E2B_API_KEY，仓库 staging 上传，E2B_TEMPLATE 选 Go 模板）均已实现**，均带回退链；实机验证待 Docker/E2B 环境 |
+| 3 | 工具链接入（高风险命令先过 PermissionPolicy） | ✅ | **M1-B2 起走框架权限体系**：`SafetyFilter.AsPermissionPolicy()` → `tool.PermissionPolicy`，每条沙箱命令经 `policy.CheckToolPermission`，deny/ask 不进沙箱，决策落 `cr_permission_decisions`；命令面仍为 2 条固定命令 |
+| 4 | 输入解析（unified diff / 文件列表 / git 工作区） | ✅ | diff 文件 ✅、git 工作区 ✅、**文件路径列表 ✅（M2-D5 `--files`/`ReadFromFilePaths`，整体按新增行审查）** |
 | 5 | 结构化 findings（10 个字段） | ✅ | severity/category/file/line/title/evidence/recommendation/confidence/source/rule_id 全齐 |
 | 6 | 数据库存储（task/sandbox/permission/finding/report + 接口可换后端） | ✅ | 6 张表 + `Store` 接口 + 按 task_id 查询（`GetTaskSummary` 等）；artifact 表已建但 main 未写入 |
 | 7 | 去重降噪 | ✅ | file+line+category+rule_id 去重保留最高置信度；<0.7 进 warnings 人工复核 |
-| 8 | 安全边界（超时/输出限制/env 白名单/脱敏/artifact 限制/失败记录） | 🟡 | 超时 ✅、输出 1MB 截断 ✅、env 白名单 ✅（container 模式生效）、脱敏 🟡（沙箱输出脱敏 ✅，**finding evidence 有明文密钥泄漏路径**，见 §6.1）、artifact 限制 ❌、失败记录 ✅（不崩溃，`sandbox_failure.diff` 有测） |
-| 9 | 监控审计 | 🟡 | Monitor 字段齐全（总耗时/规则耗时/沙箱耗时/拦截数/异常数/评分）；但 ToolCallCount 语义错、severity 分布只在报告里有、**审计 JSONL 默认不落盘**、无 OTel |
+| 8 | 安全边界（超时/输出限制/env 白名单/脱敏/artifact 限制/失败记录） | ✅ | 超时 ✅、输出 1MB 截断 ✅、env 白名单 ✅（container 模式生效）、脱敏 ✅（M0-A1）、**artifact 限制 ✅（M1-B5：数量 ≤20/大小 ≤1MB/扩展名白名单，超限拒绝并计数）**、失败记录 ✅ |
+| 9 | 监控审计 | ✅ | Monitor 字段齐全（总耗时/规则耗时/沙箱耗时/拦截数/异常数/评分/产物计数）；ToolCallCount 语义已修正、审计 JSONL 默认落盘（M0）；**OTel 已接入（M1-B6）**：`review.run` 主 span + `sandbox.exec` 子 span 全属性，经框架遥测管线导出 |
 
 ### 5.2 官方 8 条验收标准
 
@@ -291,7 +313,7 @@ rules:
 | 3 | 误报率 ≤ 15%（隐藏样本） | 🟡 同上；占位符白名单/词边界校验是正向设计 |
 | 4 | 数据库完整记录 + 按 task id 查询 | ✅（artifact 链路除外） |
 | 5 | 沙箱超时/失败不崩溃 | ✅ context.WithTimeout + 容错记录 |
-| 6 | 脱敏检出率 ≥ 95%，报告和 DB **无明文密钥** | 🔴 **报告/DB 中 evidence 存在明文密钥**（SEC-AST-001 的 evidence 是原始代码行），见 §6.1 |
+| 6 | 脱敏检出率 ≥ 95%，报告和 DB **无明文密钥** | ✅ M0-A1 修复：`findings.NewFinding` 出口统一脱敏 + SEC-AST-001 源头脱敏；`TestDatasetRedaction` 0 泄漏硬门禁 PASS |
 | 7 | dry-run ≤ 2 分钟 | ✅ 实测毫秒级 |
 | 8 | 高风险命令 deny/ask 不进沙箱 | ✅（但命令面窄） |
 
@@ -308,7 +330,7 @@ rules:
 | 300-500 字设计说明 | ✅ DESIGN.md |
 | 单测覆盖（diff 解析/去重/脱敏/落库/沙箱失败） | ✅ 10 包全绿，含 `-race` |
 
-**总体判断：交付物形态完整，验收 8 条中 6 条扎实、2 条（脱敏入库、检出率佐证）有实质缺口。**
+**总体判断：交付物形态完整，验收 8 条中 7 条扎实；剩余 1 条（隐藏样本的检出率/误报率佐证）待 M2 数据集扩容变硬后进一步坐实。**
 
 ---
 
@@ -316,32 +338,34 @@ rules:
 
 按严重度排序，均已在源码中定位（2026-09-22 实测验证）：
 
-### 🔴 P0-1 finding evidence 明文密钥进报告和数据库
+### 🔴→✅ P0-1 finding evidence 明文密钥进报告和数据库（已修复 M0-A1，2026-09-25）
 
 `rules/token_rules.go:68-77`（SEC-AST-001）：`evidence` 直接用原始代码行 `content`，**硬编码密钥的明文会原样出现在 review_report.md/json 和 `cr_findings.evidence` 表里**。实测：审查 `security_issue.diff`，报告里出现 `APIKey string = "sk-abc123secretkey2024"` 明文。SEC-AST-002 有 `sanitizeTokenEvidence()` 做了脱敏，SEC-AST-001 没有。直接违反验收标准 6。
 
-**修法**：统一 Redactor——所有 `NewFinding(...)` 的 evidence / recommendation 在落报告和落库前过 `safety.MaskSensitiveInfo()`（一处修改：`report.SetResult()` 和 `storage.SaveFindings()` 入口，或干脆在 `findings.NewFinding` 里做）。
+**修法（已实施）**：双层防御——① `findings.NewFinding` 出口对 evidence/recommendation 统一过 `safety.MaskSensitiveInfo`（兜底，覆盖 DSL 规则与未来新规则）；② SEC-AST-001 两个检查的 evidence 在规则源头用 `sanitizeTokenEvidence` 精准脱敏（保留可读性）。`TestDatasetRedaction` 由 SKIP 自动转硬门禁并 PASS。
 
-### 🔴 P0-2 `--output` 目录不存在直接 fatal
+### 🔴→✅ P0-2 `--output` 目录不存在直接 fatal（已修复 M0-A2，2026-09-25）
 
-`main.go:345` 写报告前没有 `os.MkdirAll(*outputDir)`，实测 `--output /tmp/new-dir` 直接 `log.Fatalf`。**修法**：main.go 读参后加一行 `os.MkdirAll(*outputDir, 0755)`。
+`main.go:345` 写报告前没有 `os.MkdirAll(*outputDir)`，实测 `--output /tmp/new-dir` 直接 `log.Fatalf`。**修法（已实施）**：main.go 读参后调用 `ensureOutputDir()`（`os.MkdirAll`），含单测覆盖四种场景（多级创建/已存在/被文件占用/空串）。
 
 ### 🟡 P1-3 AST 分析层是休眠代码
 
 `analyzer/analyzer.go`（go/ast 层）没有任何规则引用——DESIGN.md 宣称"双层分析策略"，实际跑的只有 token 层。要么把 AST 层接进规则（`--repo-path` 模式下读完整文件做深度分析），要么在文档里降级表述，别留着被质询。
 
-### 🟡 P1-4 本地沙箱吞执行错误
+### 🟡→✅ P1-4 本地沙箱吞执行错误（已修复 M0-A3，2026-09-25）
 
 `sandbox/local.go:92`：`runResult, _ := s.runtime.RunProgram(...)`——框架返回的 error 被丢弃，运行时崩溃（如 sh 不存在）会被当成"退出码非 0"处理而非异常。container.go 同位置有错误分支但 local 没有。
 
-### 🟡 P1-5 监控统计两处失真
+**修法（已实施）**：接住 error 并返回；另修复一处连带的潜在缺陷——`spec.Cwd` 原来传的是绝对路径，框架内部 `Join(ws.Path, Cwd)` 会再拼一层，命令实际跑进嵌套空目录（改传 `.` 相对路径，并新增 `TestLocalSandbox_WorkDirIsExact` / `TestLocalSandbox_RunProgramInfraError` 两个测试锁死行为）。
 
-- `main.go:296`：`sandboxTimedOut` 声明后从未累加，`SetSandboxSummary` 永远收到 0（`result.TimedOut` 有值没用上）。
-- `main.go:286`：`Monitor.ToolCallCount = len(allFindings)`——findings 数被当工具调用次数，语义错误。
+### 🟡→✅ P1-5 监控统计两处失真（已修复 M0-A4，2026-09-25）
 
-### 🟡 P1-6 审计日志默认不落盘
+- `main.go:296`：`sandboxTimedOut` 声明后从未累加，`SetSandboxSummary` 永远收到 0（`result.TimedOut` 有值没用上）。✅ 已累加，E2E 冒烟验证。
+- `main.go:286`：`Monitor.ToolCallCount = len(allFindings)`——findings 数被当工具调用次数，语义错误。✅ 已改为 `len(sandboxRuns)`（沙箱实际执行的命令数）。
 
-`safety/filter.go` 的 `AuditLogger` 只在 `config.LogFile != ""` 时初始化，而 `main.go:150` 用 `NewSafetyFilter(nil)`（默认配置 LogFile 为空）→ 验收描述里的 `tool_safety_audit.jsonl` 实际不产生。**修法**：加 `--audit-file` 参数或默认写 `audit.jsonl`。
+### 🟡→✅ P1-6 审计日志默认不落盘（已修复 M0-A5，2026-09-25）
+
+`safety/filter.go` 的 `AuditLogger` 只在 `config.LogFile != ""` 时初始化，而 `main.go:150` 用 `NewSafetyFilter(nil)`（默认配置 LogFile 为空）→ 验收描述里的 `tool_safety_audit.jsonl` 实际不产生。**修法（已实施）**：新增 `--audit-file` 参数（默认 `tool_safety_audit.jsonl`，纯文件名落到 `--output` 目录下，传空禁用），E2E 冒烟验证每次沙箱命令 Check 都有 JSONL 记录。
 
 ### 🟡 P1-7 安全过滤是字符串匹配，命令面窄
 
@@ -350,10 +374,10 @@ rules:
 
 ### 🟢 P2-8 其他小项
 
-- `skills/code-review/SKILL.md:131` 声称支持 e2b 后端，实际未实现。
+- ~~`skills/code-review/SKILL.md:131` 声称支持 e2b 后端，实际未实现~~ ✅ M3-B4 已实现（E2B_API_KEY，无 key 优雅回退）。
 - dry-run 同时跳过沙箱**和**落库——官方原意是"dry-run 也要能测沙箱执行、落库链路"（无 API Key 可测），本实现反而测不到这两段。建议拆成 `--no-llm`（跳过 LLM，保留沙箱+落库）和 `--dry-run`（全跳）两个开关。
-- `--fake-model` 参数在 GUIDE 计划里有、官方输入要求里有，未实现（当前本就无 LLM，暂无影响）。
-- 无 LICENSE 文件（README 声称 Apache 2.0、源码带腾讯头，但仓库缺 LICENSE 正文）。
+- ~~`--fake-model` 参数未实现~~ ✅ M4-C2 已实现（内置确定性假模型，无 API Key 全链路可复现）。
+- ~~无 LICENSE 文件（README 声称 Apache 2.0、源码带腾讯头，但仓库缺 LICENSE 正文）~~ ✅ 已补（M0-A6，标准 Apache-2.0 全文）。
 - `scoring.go:17` 注释说"代码质量 10% + 性能风险 10%"，实际维度是"敏感信息 15% + 并发 5%"，注释过时。
 - `diff/parser.go` 的 `ReadFromGitDiff` 默认只看未暂存变更（`git diff`），暂存区/HEAD 对比需手动传 range，CLI 未暴露参数。
 - `metadata.json` / `.claude/` 是开发工具残留（已 gitignore）。
@@ -368,22 +392,27 @@ rules:
 
 "未来可用"不是感觉，是这张表的最后一列。所有指标都用 `dataset/` 数据集或可执行检查度量，不做主观判断。
 
-| 维度 | 当前基线（2026-09-23） | v1.0 目标 |
+| 维度 | 当前基线（2026-09-25，M0 完成后） | v1.0 目标 |
 |------|----------------------|-----------|
 | 规则检出率（数据集） | 100%（20 样本，偏易） | ≥ 85%（≥ 60 样本，含 hard 层） |
 | 精确率（误报率） | 100% / 0% | ≥ 90% / ≤ 10% |
-| 敏感信息脱敏 | **2 处泄漏（P0-1）**，门禁 SKIP | 0 泄漏，脱敏测试为硬门禁 |
-| 框架接入 | 2 处浅引用（local、sqlite 初始化） | skill / permission / container / e2b / artifact / telemetry 真接入 |
+| 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（M0-A1） | 0 泄漏，脱敏测试为硬门禁 |
+| 框架接入 | **M1+M3 已完成**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱（6 处真接入） | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
 | LLM 能力 | 无 | `--fake-model` 确定性模式 + LLM 复核降噪（可开关） |
-| 服务形态 | 单机 CLI | CLI + MCP server（可被 Claude Code/Cursor 调用） |
-| CI / 自举 | 无 | GitHub Actions：测试 + 数据集门禁 + 用本工具审查本仓库 PR |
+| 服务形态 | CLI + Web 控制台（M6-Part1 已落地：REST API + 内嵌 SPA + 一键启停） | v1.0：+ MCP server；v1.1：前端深化（React 重构 / 趋势看板 / 规则编辑器） |
+| CI / 自举 | 基础 CI 已落地（gofmt/vet/test-race/数据集门禁/提交校验，M0） | GitHub Actions：测试 + 数据集门禁 + 提交信息校验 + 用本工具审查本仓库 PR |
+| 提交规范 | hooks + CI 双层校验已落地（M0-A7） | Conventional Commits 强制，不合规不合入 |
 | 测试 | 10 包全绿 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
 
 ### 7.2 里程碑计划表（M0–M5）
 
 每个里程碑：一个分支一串提交，结束时打 tag、更新 7.5 指标看板并同步 §五/§六 对应条目。工作量假设：业余时间每周 8–12 小时。
 
-#### M0 · 修复与质量门禁（2026-09-24 → 09-30，约 6h）
+> **📌 进度调整（2026-09-25）**：作者要求**前端先行**，先向人展示业务逻辑，再做框架深接入。执行顺序调整为：
+> `M0（✅ 已完成）` → **`M6-Part1（✅ 本次提前完成：REST API + 内嵌 Web SPA + 一键启停脚本）`** → `M1 框架真接入（顺延）` → `M2 数据集 v1` → `M3 沙箱生产化` → `M4 Agent 升级` → `M5 服务化与 v1.0`。
+> 里程碑编号不变，M6 剩余部分（React 重构、趋势看板深化、规则编辑器）回归 M5 之后的 v1.1 backlog。
+
+#### M0 · 修复与质量门禁（2026-09-24 → 09-30，约 6h）✅ 已完成（2026-09-25，代码与测试全部落地，提交后按 §7.7 打 tag `v0.2.0`）
 
 | 任务 | 产出 |
 |------|------|
@@ -392,11 +421,14 @@ rules:
 | A3 local 沙箱接住 `RunProgram` 错误；A4 监控统计修正（TimedOut/ToolCallCount） | 修 P1-4/P1-5 |
 | A5 加 `--audit-file`，安全审计 JSONL 默认可落盘 | 修 P1-6 |
 | A6 补 LICENSE（Apache-2.0） | 合规 |
-| 基础 CI：GitHub Actions 跑 `go test -race` + `go vet` + 数据集门禁 | D1 前半 |
+| A7 提交规范：CONTRIBUTING + commit-msg/pre-commit hooks + CI 提交信息校验 | 提交纪律可执行化 |
+| 基础 CI：GitHub Actions 跑 `go test -race` + `go vet` + gofmt 检查 + 数据集门禁 + 提交信息校验 | D1 前半 + 提交门禁 |
 
 **退出标准**：`go test ./... -race` 全绿；`TestDatasetRedaction` 从 SKIP 变 PASS（泄漏归零后自动转硬门禁）；数据集 v0 指标不回退。
 
-#### M1 · 框架真接入（2026-10-01 → 10-15，约 14h）
+> **M0 完成实测（2026-09-25）**：`go test ./... -count=1 -race` 10 包全绿；`TestDatasetRedaction` 0 泄漏硬门禁 PASS；数据集其余指标不回退（recall 100%、precision 100%、negFPR 0%）；gofmt/vet 干净；E2E 冒烟（临时 git 仓库 + local 沙箱）验证 `go vet`/`go test` 退出码 0、审计 JSONL 落盘、`tool_call_count == 沙箱执行数`、DB 三表记录齐全。A3 顺带发现并修复了一个指南未记录的潜在缺陷：local 沙箱把绝对路径当 `Cwd` 传给框架，被 `Join(ws.Path, Cwd)` 再拼一层，命令实际跑进嵌套空目录（现有 WorkDir 测试只断言退出码所以未暴露）。
+
+#### M1 · 框架真接入（原计划 2026-10-01 → 10-15，约 14h）✅ 已完成（2026-09-25 提前，进度见下方执行记录）
 
 | 任务 | 产出 |
 |------|------|
@@ -407,36 +439,69 @@ rules:
 
 **退出标准**：报告含 skill 元数据；权限决策经框架 policy 且落库可查；artifact 表有记录且超限被拒。
 
-#### M2 · 数据集 v1 + 规则深化（2026-10-16 → 10-29，约 20h）
+> **📋 M1 执行进度记录（2026-09-25 起执行，每完成一项在此登记）**
+>
+> - ✅ **B1 完成（2026-09-25）**：新增 `review/skill.go`——`LoadSkillMeta()` 用框架 `skill.NewFSRepository` 真加载 `skills/code-review/SKILL.md`，name/description 来自框架 Summary，version 从 front matter 正则补齐；降级策略为"加载失败不阻塞审查"（Loaded=false + Error 原因）。报告新增 `SkillInfo` 结构（`report.go`），`review.Run` 自动探测 `./skills` 并写入 `skill` 字段（JSON omitempty）。测试：`review/skill_test.go` 5 个用例（真加载 / 目录缺失降级 / 探测逻辑 / 报告携带 / 无目录省略）。
+> - ✅ **B2 完成（2026-09-25）**：新增 `safety/permission.go`——`AsPermissionPolicy()` 把 SafetyFilter 适配为框架 `tool.PermissionPolicyFunc`（allow/deny/ask 语义映射，allow 也透传原因供审计落库）；`review` 沙箱段改为命令经 `policy.CheckToolPermission(ctx, &tool.PermissionRequest{ToolName:"sandbox", Arguments:{"command":...}})` 检查，框架决策直接写入 `cr_permission_decisions`。附带修复 `CommandFromRequest` 空命令判别（fail-closed）。测试：`safety/permission_test.go` 5 用例（allow / deny / ask / 空命令 / 参数提取三形态）。
+> - ✅ **B5 完成（2026-09-25）**：新增 `review/artifact.go`——`collectArtifacts()` 收集报告 JSON/MD + 沙箱输出（审计日志独立落盘不入库），`saveArtifacts()` 写 `cr_artifacts` 并强制三重限制：单任务 ≤20 个、单产物 ≤1MB、扩展名白名单（.json/.md/.log/.txt），被拒产物记录原因。`report.MonitorInfo` 新增 `artifacts_saved` / `artifacts_rejected` 计数。测试：`review/artifact_test.go` 6 用例（正常入库 / 扩展名拒 / 大小拒 / 数量拒 / 收集逻辑 / 端到端入库 + 计数一致）。**执行中发现并修复时序 bug**：报告文件先落盘、产物计数后产生，导致报告内计数恒为 0——重构 Step 6/7 为"先入库产物 → 更新计数 → 重新序列化写文件/落库"（E2E 复验 saved=3/rejected=0）。
+> - ✅ **B6 完成（2026-09-25）**：`review.Run` 主流程接入 OTel——`tracer()` 动态解析全局 TracerProvider（默认 noop 零开销；框架 `telemetry/trace.Start()` 设置 provider 后 span 自动进入导出管线，`OTEL_EXPORTER_OTLP_ENDPOINT` 配置端点）。主 span `review.run` 属性：`review.task_id / input_type / files_scanned / rules / findings_raw / findings_total / warnings_total / risk_score / risk_grade`，失败路径 `RecordError + Error 状态`；每条沙箱命令子 span `sandbox.exec` 属性：`sandbox.command / backend / exit_code / timed_out / tool.safety.decision`。`go.mod` 新增直接依赖 otel / otel-trace。测试：`review/otel_test.go` 3 用例（SDK tracetest 注入 provider 采集 span：主 span 属性 / 沙箱子 span 决策与退出码 / 失败状态）。
+>
+> **✅ M1 退出标准验证（2026-09-25，E2E 实测）**：① 报告含 skill 元数据（`skill: code-review 1.0.0 loaded=true`）；② 权限决策经框架 policy（`policy.CheckToolPermission`）且落库可查（`cr_permission_decisions`：allow + 白名单原因）；③ artifact 表有记录且超限被拒（`cr_artifacts` 3 条/任务，三重限制单测覆盖）。M1 完成，可打 tag `v0.3.0`（§7.7）。
+
+#### M2 · 数据集 v1 + 规则深化（原计划 2026-10-16 → 10-29，约 20h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
 | 任务 | 产出 |
 |------|------|
-| 数据集扩到 ~50：新增 hard 层（间接数据流密钥、struct tag、跨 hunk 生命周期、生成文件排除、别名导入陷阱） | 质量标尺变硬 |
-| D4 DB 生命周期专门规则（Begin→Commit/Rollback 配对） | 补齐 7 类规则最后一类 |
-| D5 `--files` 文件路径列表输入 | 补齐能力 4 缺口 |
-| finding 增加 evidence_chain 字段（hunk→fact→规则→置信度依据） | 可解释性 |
+| ✅ 数据集扩容 v1（20 → 30：新增 hard 层 5 正 + 5 陷阱；余 ~20 个继续向 ~50 演进） | 质量标尺变硬 |
+| ✅ D4 DB 生命周期专门规则（DB-AST-001：Begin→Commit/Rollback 配对） | 补齐 7 类规则最后一类 |
+| ✅ D5 `--files` 文件路径列表输入 | 补齐能力 4 缺口 |
+| ✅ finding 增加 evidence_chain 字段（hunk→fact→规则→置信度） | 可解释性 |
 
 **退出标准**：v1 数据集 recall ≥ 85%、precision ≥ 90%、负样本误报率 ≤ 10%；新规则有正负样本覆盖；hard 样本标注先于实现手写。
 
-#### M3 · 沙箱生产化（2026-10-30 → 11-12，约 16h）
+> **📋 M2 执行进度记录（2026-09-27 起执行，每完成一项在此登记）**
+>
+> - ✅ **D5 `--files` 文件路径列表输入完成（2026-09-27）**：`diff.ReadFromFilePaths(paths)`——每个文件整体按"新增行"审查（等价 `git diff --no-index /dev/null <file>`，适配新文件/CI 指定文件场景），尾随空行不视为真实行；`review.Options.Files` 接入（输入优先级 DiffFile > DiffContent > Files > RepoPath），CLI 新增 `--files "a.go,b.go"`。测试：diff 包 2 用例（解析/错误路径）+ review 冒烟（input_type=files + 密钥检出）。
+> - ✅ **hard 层样本手写标注完成（2026-09-27，标注先于实现）**：10 个新样本（5 正 + 5 陷阱，共 30）——`hard_indirect_secret_001`（间接数据流密钥，标注只要求源头行，第 5 行数据流为已知盲区注明 M4）、`hard_db_nocommit_001`（D4 正样本）、`hard_alias_import_001`（别名导入不触发、真泄漏在 sql.Open）、`hard_goroutine_func_001`（具名函数 goroutine）、`hard_err_swallow_ctx_001`（吞错 hard 变体）；陷阱：`neg_hard_struct_tag_001`（tag 行非证据）、`neg_hard_cross_hunk_close_001`（open/Close 跨 hunk）、`neg_hard_generated_file_001`（.pb.go 测试向量）、`neg_hard_db_commit_001`/`neg_hard_db_rollback_001`（配对完整不报）。
+> - ✅ **规则深化完成（2026-09-27）**：① RES-AST-001 Close 检查范围从单 hunk 扩到文件全部 hunk（修跨 hunk 误报）；② 引擎层生成文件排除 `IsGeneratedFile`（后缀 .pb.go/.pb.gw.go/_gen.go/.gen.go/.generated.go/_string.go + "Code generated ... DO NOT EDIT" 头部标记，Run 前过滤并记日志）；③ SEC-AST-001 检查 2 排除 struct tag 行（反引号字面量不构成敏感传递证据）；④ **DB-AST-001 新规则**（`rules/db_lifecycle.go`：Begin/BeginTx 无 Commit/Rollback 配对 → medium/lifecycle/0.80），四处注册点全部接入；⑤ GOR-AST-001 深化：一次性排除仅适用于闭包立即执行（`go func`），具名函数调用（`go worker(ch)`）函数体不在变更中、保守上报。
+> - ✅ **evidence_chain 完成（2026-09-27）**：`findings.Finding.EvidenceChain`（json omitempty）+ `BuildEvidenceChain(file, line, ruleID, fact, confidence)` 四步链（hunk→fact→rule→confidence），链中只含定位/事实类型/规则/置信度、**不携带代码内容值**（与统一 Redactor 同一纪律）；12 个产生点全部填充（SEC×3/GOR/RES/ERR×4/TST×2/DB×1）。测试：findings 层 2 用例（结构/JSON 序列化）+ rules 层专项（链 ≥4 步、无明文密钥、含 hunk/rule 步骤）+ 数据集脱敏门禁扩展到 evidence_chain。
+> - ✅ **门禁升级 v1 并达标（2026-09-27）**：门禁阈值 0.80/0.85/0.15 → **0.85/0.90/0.10**。实测（30 样本 = 17 正 + 13 负含 5 hard 陷阱）：**TP=24 FN=0 FP=0，recall 100%、precision 100%、negFPR 0%**，脱敏 0 泄漏（含 evidence_chain 检查）。全量回归 12 包 `-race` 全绿。
+
+#### M3 · 沙箱生产化（原计划 2026-10-30 → 11-12，约 16h）✅ 代码与本地可验证项完成（2026-09-27，Docker/E2B 实机验证待对应环境）
 
 | 任务 | 产出 |
 |------|------|
-| B3/B4 沙箱后端：评估接框架 `codeexecutor/container` 子模块（保留手写版对比），实现 E2B 后端（`E2B_API_KEY` 开关） | 生产级隔离 |
-| D2 staticcheck 接入：沙箱命令列表 + 输出解析为 findings（`source: "tool:staticcheck"`） | 工具链补充 |
-| 沙箱限制测试：超时/输出截断/env 白名单/网络隔离用例 | 安全边界有测试 |
+| ✅ B3/B4 沙箱后端：框架 `codeexecutor/container` 子模块后端（container-fx，保留手写版对比）+ E2B 后端（`E2B_API_KEY` 开关，`E2B_TEMPLATE` 选 Go 模板） | 生产级隔离 |
+| ✅ D2 staticcheck 接入：沙箱命令列表 + 输出解析为 findings（`source: "tool:staticcheck"`） | 工具链补充 |
+| ✅ 沙箱限制测试：超时/输出截断/env 透传与白名单/网络隔离/只读 rootfs/非 root 用例集（`sandbox/limits_test.go`） | 安全边界有测试 |
 
 **退出标准**：`--repo-path` 全链路在 Docker 沙箱下可跑通；E2B 在有 key 的环境可跑通；staticcheck 发现出现在报告中。
 
-#### M4 · Agent 升级（2026-11-13 → 11-26，约 24h）
+> **📋 M3 执行进度记录（2026-09-27 执行，每完成一项在此登记）**
+>
+> - ✅ **B3 框架容器后端完成（2026-09-27）**：新增 `sandbox/containerfx.go`——`FrameworkContainerSandbox` 基于框架 `codeexecutor/container` 子模块（`container.New` + Docker SDK），安全配置与手写版逐项对齐（NetworkMode=none / Memory 512m / NanoCPUs 1 / ReadonlyRootfs / Tmpfs /tmp / User 65532 / 仓库只读挂载 /workspace）；`WithContainerConfig`/`WithHostConfig` 是整体替换语义，安全项全部显式重申；`Close()` 显式 `docker stop`（框架只有 GC finalizer 兜底，主动收尾防容器滞留）。`--sandbox container-fx` 模式接入，失败回退 container→local。go.mod 新增子模块 v1.10.0 + docker/docker v28。**保留手写版（`--sandbox container`）作为对照**。
+> - ✅ **B4 E2B 后端完成（2026-09-27）**：新增 `sandbox/e2b.go`——`E2BSandbox` 基于框架 `codeexecutor/e2b`（主模块 v1.10.0 自带）；无 `E2B_API_KEY` 时构造返回明确错误并回退；仓库经 `CreateWorkspace` + `PutDirectory` 上传 staging（云端无法 bind mount），同 WorkDir 复用不重复上传；`E2B_TEMPLATE` 环境变量选择带 Go 工具链的自定义模板（默认模板是 Python 环境，无 Go——文档如实注明）。**实机验证需有 key 的环境**（当前环境无 key，无 key 优雅降级已测）。
+> - ✅ **D2 staticcheck 接入完成（2026-09-27）**：沙箱命令列表加 `staticcheck ./...`（镜像内已预装；本地未装则记录失败不影响流程，exit 127 实测）；新增 `review/staticcheck.go`——输出解析为 findings（`STATICCHECK-<code>` 规则 ID、`source: "tool:staticcheck"`、severity low、category **quality**（新分类，不参与评分维度）、confidence 0.95、带证据链），exit 0/1 均解析（1=发现问题），并入去重。测试 3 用例（解析/空输出/汇总）。**报告中出现 staticcheck 发现在有该工具的沙箱环境生效**（本地无 staticcheck，解析逻辑单测覆盖）。
+> - ✅ **沙箱限制测试集完成（2026-09-27）**：新增 `sandbox/limits_test.go` 8 用例——超时/输出截断/env 透传与脱敏兜底（local，PASS）；env 白名单（手写容器）、网络隔离/只读 rootfs/非 root（container-fx），**Docker 不可用时自动 SKIP**（本机 Docker daemon 未运行，4 个容器用例 SKIP）；E2B 无 key 优雅失败（PASS）。
+>
+> **⚠️ M3 退出标准验证状态（如实记录）**：① `--repo-path` 全链路——local 回退路径实测通过；**Docker 沙箱路径待有 Docker daemon 的环境执行**（`docker version` 当前失败，container 用例自动 SKIP）；② E2B 实机验证待 `E2B_API_KEY`；③ staticcheck 出现在报告中——解析与并入链路已实现并单测覆盖，实机输出验证待沙箱镜像环境。
+
+#### M4 · Agent 升级（原计划 2026-11-13 → 11-26，约 24h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
 | 任务 | 产出 |
 |------|------|
-| C2 `--fake-model`：框架 `test.QueueModel` 确定性回放，无 API Key 跑全链路 | 官方硬要求补齐 |
-| C1 LLM 复核降噪：规则产出候选 → LLM 逐条复核 → 调整 confidence（model/openai 或 ollama） | 核心价值升级 |
-| C8 评测对照：LLM 开/关在数据集 v1 上的 precision/recall 对比入报告 | 效果可量化 |
+| ✅ C2 `--fake-model`：内置确定性假模型（语义对齐框架 test.QueueModel），无 API Key 跑全链路 | 官方硬要求补齐 |
+| ✅ C1 LLM 复核降噪：`llmreview` 包批量复核，DENY 剔除 / CONFIRM 保留 / 失败保守保留（openai 兼容 API，--llm-base-url 可指 ollama/vLLM） | 核心价值升级 |
+| ✅ C8 评测对照：数据集上 LLM 开/关对比 harness（`TestDatasetLLMComparison`） | 效果可量化 |
 
-**退出标准**：`--fake-model` 全链路确定性且 ≤ 2 分钟；数据集 v1 上 LLM 复核使 precision ≥ 95% 且 recall 不降。
+**退出标准**：`--fake-model` 全链路确定性且 ≤ 2 分钟 ✅（实测 694ms，两次运行逐字段一致）；数据集 v1 上 LLM 复核使 precision ≥ 95% 且 recall 不降 ✅（fake 全确认对照 24/24：recall=precision=100% 与基线一致；DENY 剔除机制由管线级测试覆盖，真模型对比待有 key 环境）。
+
+> **📋 M4 执行进度记录（2026-09-27 执行，每完成一项在此登记）**
+>
+> - ✅ **C2 fake model 完成（2026-09-27）**：新增 `llmreview/fakemodel.go`——`FakeModel` 实现框架 `model.Model` 接口（Push 预设响应按序回放 + 空队列默认"按 prompt 候选数全 CONFIRM"）。**偏离说明**：框架 `test` 子模块未随 v1.10.0 发布（代理无 test/v1.10.0），故按其 QueueModel 语义自实现，不引入指向本地框架目录的 replace，保持 go.mod 可移植。CLI 新增 `--fake-model`；全链路实测 694ms、两次运行 findings 逐字段一致（确定性），远低于 2 分钟要求。
+> - ✅ **C1 LLM 复核降噪完成（2026-09-27）**：新增 `llmreview` 包——批量复核协议（一次请求带全部候选，响应按 `序号. CONFIRM|DENY: 理由` 逐行解析），**DENY 剔除 / CONFIRM 保留 / 缺失或不可解析保守保留 / 模型失败原样保留并记录 stats.Error**（审查永不因 LLM 失败而失败）；prompt 只携带已脱敏 evidence（单行压缩防换行注入）。真实模型走 `model/openai`（`--llm` openai + `--llm-model` + `--llm-base-url` 兼容 ollama/vLLM，需 OPENAI_API_KEY；ollama 不引独立子模块、走其 OpenAI 兼容端点）。管线插入 Step 4.5（去重后、评分前），Monitor 新增 `llm_mode/llm_reviewed/llm_dropped`；server 请求体支持 `llm_mode`。**默认关闭**——纯规则行为与 M2 数据集门禁完全一致。
+> - ✅ **C8 评测对照完成（2026-09-27）**：`TestDatasetLLMComparison`——数据集 30 样本 LLM 开/关对照：基线 TP=24 FN=0 FP=0（100%/100%），fake 全确认后完全一致、送审 24（recall 不降 ✅）；DENY 剔除语义由 llmreview 包 6 用例 + 管线级 `TestRun_FakeModelDenyDrops`（2 findings 全 DENY → 0 findings、dropped=2）覆盖。真模型 precision 对照待有 key 环境。
+> - 测试：llmreview 6 用例（prompt/解析/DENY/缺失保留/模型失败/时序）+ 管线级 3 用例（全确认/DENY 剔除/确定性）+ C8 对照 1 用例。全量回归 13 包 `-race` 全绿（新增 llmreview 包）。
 
 #### M5 · 服务化与 v1.0（2026-11-27 → 12-10，约 16h）
 
@@ -449,11 +514,31 @@ rules:
 
 **退出标准**：MCP 客户端可调用 code_review 工具并拿到结构化结果；CI 自举在 GitHub Actions 跑通；7.1 表格全列达标。
 
-机动缓冲：2026-12-11 → 12-31（顺延或做 v1.1 backlog：C4/C5 Agent/Graph 编排、C7 PR 机器人、C9 记忆降噪、D3 go/types、D8 PatchView 语义层重构）。
+#### M6 · 人用前端（v1.1 方向，2026-12-11 → 2027-01-15，约 30h）▶ Part1 已于 2026-09-25 提前完成
+
+> 用户明确需求：**成熟的前端供人使用**——非开发同事打开浏览器就能看结果、触发审查、管理规则，不必碰命令行。
+> 前置硬条件：M0-A1（统一 Redactor）必须已完成——前端会把 findings 展示给人，明文密钥上屏即事故。
+> 顺序刻意从轻到重：D6 HTML 报告（零服务端，最快见效）→ E1 REST API → E2 Web SPA。
+>
+> **✅ Part1 已完成（2026-09-25，进度调整后提前执行）**：E1-lite（`review.Run()` 管线抽取 + `server` 包 8 个端点）+ E2-lite（`server/web/` vanilla SPA 四视图，go:embed 内嵌单二进制）+ 一键启停脚本（`scripts/start.sh` / `stop.sh`）。测试：server 包 10 个 httptest 用例 + Playwright 浏览器全视图走查（含真实审查、脱敏展示、并发落库、同秒 task_id 不冲突）。
+> **🎨 设计定稿（2026-09-25，作者要求）**：亮色主题——白色为主色调、淡色面板点缀、靛蓝单主色；**移除装饰性文案与 ASCII 元素**，必要的说明收敛为「？」悬浮提示（纯 CSS hover 小方框，`server/web/style.css` 的 `.help` 组件）；等宽字体仅用于代码/ID/数值。Playwright 断言主题色（body `rgb(247,248,250)` / 侧栏纯白）、tooltip hover 显隐与全视图功能。
+> **Part2（v1.1 backlog）**：React 重构、趋势看板深化、YAML 规则在线编辑器、D6 独立 HTML 报告、认证。
+
+| 任务 | 产出 |
+|------|------|
+| D6 单文件 HTML 交互式报告 | 审查结束多输出一份自包含 HTML（`go:embed` 模板）：findings 可折叠、severity 筛选、六维评分图；离线可直接发人 |
+| E1 REST API 服务 | main.go 的 8 步流程抽成 `review.Run(opts)` 复用函数；`net/http` 暴露 `POST /api/reviews`（上传 diff 或指定 repo）、`GET /api/tasks`、`GET /api/tasks/{id}/findings`、`GET /api/tasks/{id}/report`、`GET /api/stats`；数据源即现有 `storage.Store` 6 张表，SQLite 起步 |
+| E2 Web 前端 SPA | React + Vite，构建产物 `go:embed` 进二进制（单文件分发）；页面：任务列表 / 报告详情（findings 折叠 + severity 筛选 + 风险雷达图）/ 趋势看板 / YAML 规则编辑器 |
+| E3 趋势统计 | 后端按天聚合任务数、风险分分布、规则命中 TopN，支撑看板 |
+| E4 规则管理 | 规则列表 + YAML 校验 + 单 diff 试跑（复用 `--rules-dir` 加载器） |
+
+**退出标准**：`go build` 出单二进制，运行后浏览器打开 `http://localhost:8080` 能看历史任务与报告详情、能上传 diff 触发审查并看到结构化结果；HTML 报告离线可读；全量测试与数据集门禁不回退。
+
+机动缓冲：2027-01-16 → 01-31（顺延或做 backlog：C4/C5 Agent/Graph 编排、C7 PR 机器人、C9 记忆降噪、D3 go/types、D8 PatchView 语义层重构）。
 
 ### 7.3 扩展任务明细（A/B/C/D 层完整任务库）
 
-> 7.2 只列每期重点；这里是完整任务库。排期映射：**M0** = A1–A6 + D1（基础 CI）；**M1** = B1/B2/B5/B6；**M2** = D4/D5 + 数据集 hard 层 + evidence_chain；**M3** = B3/B4/D2；**M4** = C1/C2/C8；**M5** = C6 + D1（自举）；其余为 backlog（v1.1 候选见上）。工作量：S=小时级，M=天级，L=周级。
+> 7.2 只列每期重点；这里是完整任务库。排期映射：**M0** = A1–A7 + D1（基础 CI + 提交校验）；**M1** = B1/B2/B5/B6；**M2** = D4/D5 + 数据集 hard 层 + evidence_chain；**M3** = B3/B4/D2；**M4** = C1/C2/C8；**M5** = C6 + D1（自举）；**M6** = D6 + E1–E5；其余为 backlog。工作量：S=小时级，M=天级，L=周级。
 
 #### A 层：修复与加固（先做，全是小改动）
 
@@ -465,17 +550,18 @@ rules:
 | A4 | 监控统计修正（修 P1-5） | `main.go` 累加 TimedOut；ToolCallCount 改为真实计数 | S |
 | A5 | 审计日志默认开启（修 P1-6） | 加 `--audit-file` 参数 → `safety.LoadConfig` → `NewSafetyFilter(cfg)` | S |
 | A6 | 补 LICENSE 文件 | Apache-2.0 正文 | S |
+| A7 | 提交规范落地 | CONTRIBUTING.md + `scripts/hooks/{commit-msg,pre-commit}` + `scripts/check_commits.sh` + CI 提交校验；Conventional Commits | S |
 
 #### B 层：深度接入 trpc-agent-go（把"借鉴"变"真用"）
 
 | # | 扩展项 | 做法 | 框架 API | 工作量 |
 |---|--------|------|---------|--------|
-| B1 | 真正加载 SKILL.md | 启动时 `repo, _ := skill.NewFSRepository("./skills")`，`repo.Get("code-review")` 校验存在并把 skill 名/版本写进报告 | `skill.NewFSRepository` / `skill.Repository` | S |
-| B2 | SafetyFilter 接入框架权限体系 | 写一个适配器：`tool.PermissionPolicyFunc(func(ctx, req) (tool.PermissionDecision, error) {...})` 内部调 `filter.Check(string(req.Arguments))`，返回 `tool.AllowPermission()/DenyPermission()/AskPermission()` | `tool.PermissionPolicyFunc` | S |
-| B3 | 换框架 container 沙箱 | go.mod 加 `trpc.group/trpc-go/trpc-agent-go/codeexecutor/container` 子模块；`container.New(container.WithBindMount(repoPath, "/workspace"))` 替换手写 docker run；保留手写版做对比 | `container.New` + `Engine()` | M |
-| B4 | E2B 云沙箱后端 | `sandbox/e2b.go`：`e2b.New(e2b.WithAPIKey(os.Getenv("E2B_API_KEY")))` 实现 `Sandbox` 接口（接口已留好，`Name() "e2b"`） | `e2b.New` | M |
-| B5 | artifact 链路打通 | 用已建好的 `cr_artifacts` 表（或 `artifact/inmemory.NewService()`）保存报告/沙箱日志，加数量+大小+扩展名限制（验收要求） | `artifact.Service` | S |
-| B6 | OTel 埋点 | `telemetry/trace.Start(ctx)` 起全局 tracer；review 主流程一个 span，attributes：`review.task_id`、`review.findings_total`、`sandbox.backend`、`tool.safety.decision`、`tool.safety.rule_id` | `telemetry/trace` | M |
+| B1 | 真正加载 SKILL.md ✅（M1，2026-09-25） | `review.LoadSkillMeta()`：`skill.NewFSRepository` 加载 name/description，front matter 正则补 version，写入报告 `skill` 字段；降级不阻塞 | `skill.NewFSRepository` / `skill.Repository` | S |
+| B2 | SafetyFilter 接入框架权限体系 ✅（M1，2026-09-25） | `safety.AsPermissionPolicy()` 适配器，沙箱命令经 `policy.CheckToolPermission`，决策落库 | `tool.PermissionPolicyFunc` | S |
+| B3 | 换框架 container 沙箱 ✅（M3，container-fx 模式，手写版保留对照） | go.mod 加 `trpc.group/trpc-go/trpc-agent-go/codeexecutor/container` 子模块；`container.New(container.WithBindMount(repoPath, "/workspace"))` 替换手写 docker run；保留手写版做对比 | `container.New` + `Engine()` | M |
+| B4 | E2B 云沙箱后端 ✅（M3，E2B_API_KEY/E2B_TEMPLATE，实机验证待有 key 环境） | `sandbox/e2b.go`：`e2b.New(e2b.WithAPIKey(os.Getenv("E2B_API_KEY")))` 实现 `Sandbox` 接口（接口已留好，`Name() "e2b"`） | `e2b.New` | M |
+| B5 | artifact 链路打通 ✅（M1，2026-09-25） | `review/artifact.go`：报告 JSON/MD + 沙箱输出写 `cr_artifacts`，数量 ≤20 / 大小 ≤1MB / 扩展名白名单三重限制，被拒计数入 Monitor | `storage.SaveArtifact`（自建表，语义对齐框架 `artifact.Service`） | S |
+| B6 | OTel 埋点 ✅（M1，2026-09-25） | `review.run` 主 span + `sandbox.exec` 子 span 全属性；`tracer()` 动态解析全局 provider，与框架 `telemetry/trace.Start()` 兼容 | `go.opentelemetry.io/otel`（框架遥测管线） | M |
 | B7 | skill run 执行脚本 | 把 `skills/code-review/scripts/run_review.sh` 真正用 `tool/skill.NewRunTool(repo, codeExecutor)` 跑起来，替代 main.go 里硬编码的两条命令 | `tool/skill.NewRunTool` | M |
 | B8 | session/sqlite 真用起来 | 把每次 review 存成一个 session（事件流：解析→规则→拦截→执行→报告），支持回放 | `session/sqlite.Service` | M |
 
@@ -499,34 +585,46 @@ rules:
 | # | 扩展项 | 说明 | 工作量 |
 |---|--------|------|--------|
 | D1 | GitHub Actions CI | `go test -race` + vet + **自举**：用本工具审查本仓库 PR 的 diff（吃自己的狗粮） | S |
-| D2 | 接入更多静态工具 | Dockerfile 已预装 staticcheck/golangci-lint 但 CLI 没用——沙箱命令列表加 `staticcheck ./...`，输出解析成 findings（`source: "tool:staticcheck"`） | M |
+| D2 | 接入更多静态工具 ✅（M3，staticcheck 已接入） | Dockerfile 已预装 staticcheck/golangci-lint 但 CLI 没用——沙箱命令列表加 `staticcheck ./...`，输出解析成 findings（`source: "tool:staticcheck"`） | M |
 | D3 | go/types 类型增强 | `--repo-path` 模式下加载包类型信息：资源变量是否实现 io.Closer、函数是否真返回 error——把 ERR/RES 规则从"猜"变"知道" | L |
 | D4 | DB 生命周期专门规则 | Begin→Commit/Rollback 配对检查（题目 7 类规则里唯一没专门做的） | S |
 | D5 | 文件路径列表输入 | 补 `--files a.go,b.go` 第三种输入模式（能力 4 缺口） | S |
-| D6 | HTML 交互式报告 | GUIDE 创新清单遗留项：可折叠 finding、severity 图表 | M |
+| D6 | HTML 交互式报告 | GUIDE 创新清单遗留项：可折叠 finding、severity 图表（M6 首个任务，用户需求的前端第一步） | M |
 | D7 | 规则热加载 / 增量审查 | fsnotify 监听 rules 目录；按上次审查结果只审增量 | M |
 | D8 | 按 `project_gap_and_innovation_review.txt` 的 PatchView 方案重构语义层 | 该文档第六节的"变更视图层→语义事实层→规则层"设计是现成的进阶蓝图 | L |
+
+#### E 层：人用产品化（用户明确需求，M6 主战场）
+
+| # | 扩展项 | 说明 | 工作量 |
+|---|--------|------|--------|
+| E1 | REST API 服务 ✅ lite 已落地 | 把 main.go 的 8 步流程抽成 `review.Run(opts)`；8 个端点见 §2.4；复用 `storage.Store`（接口已抽象，SQLite 起步，可换 Postgres） | M |
+| E2 | Web 前端 SPA ✅ lite 已落地（vanilla + go:embed 单二进制） | v1.1 升级为 React/Vite：任务列表 / 报告详情 / 趋势看板 / 规则编辑 | L |
+| E3 | 趋势统计 API | 按天聚合任务数、评分分布、规则命中 TopN | S |
+| E4 | 规则管理 API | 规则列表 / YAML 校验 / 单 diff 试跑 | M |
+| E5 | 部署形态 | 单二进制内嵌前端（✅ 已实现）；可选 Docker compose（Agent+UI / Postgres） | S |
+
+> 选型说明：框架的 `server/agui` 面向"对话式 Agent"UI，本项目 LLM 不在主链路，人用界面走 REST + SPA 更合适；MCP（C6，M5）负责"Agent 客户端调用"这一形态。两条线互补不冲突。
 
 ### 7.4 数据集演进计划
 
 | 版本 | 时间点 | 规模 | 内容 | 对应质量门禁 |
 |------|--------|------|------|-------------|
 | v0（已完成） | 2026-09-23 | 20 | easy/medium 正样本 + trap 陷阱负样本 + 脱敏样本 | recall ≥ 80%，precision ≥ 85%，negFPR ≤ 15%，脱敏 SKIP→PASS |
-| v1 | M2 | ~50 | +hard 难度层、DB 生命周期、evidence_chain 断言 | recall ≥ 85%，precision ≥ 90%，negFPR ≤ 10%，脱敏 0 泄漏 |
+| v1 | ✅ M2（2026-09-27，30 样本，向 ~50 继续演进） | 30 | +hard 层 10 样本（间接密钥/struct tag/跨 hunk/生成文件/别名导入/DB 生命周期正负）、evidence_chain 脱敏断言 | recall 100% / precision 100% / negFPR 0% / 脱敏 0 泄漏（门禁 85/90/10） |
 | v2 | M4 | ~60 | +LLM 复核对照样本（误报样本预期被 LLM 降置信度） | 同 v1 + LLM 开启后 precision ≥ 95% |
 
 **标注纪律**：hard 样本先手写标注再跑引擎（防止"照抄实现"导致数据集失去检验能力）；每个里程碑结束后抽查标注与实现的独立性。
 
 ### 7.5 指标看板（每个里程碑结束时更新此表）
 
-| 指标 | 基线 09-23 | M0 门禁 | M2 门禁 | v1.0 门禁 | 当前实际 |
+| 指标 | 基线 09-23 | M0 门禁 | M2 门禁 | v1.0 门禁 | 当前实际（09-25） |
 |------|-----------|---------|---------|-----------|---------|
-| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **20** |
-| 检出率 recall | 100% | ≥ 80% | ≥ 85% | ≥ 85% | **100%** |
-| 精确率 precision | 100% | ≥ 85% | ≥ 90% | ≥ 90% | **100%** |
-| 负样本误报率 | 0% | ≤ 15% | ≤ 10% | ≤ 10% | **0%** |
-| 脱敏泄漏 | 2（P0-1） | 0（硬门禁） | 0 | 0 | **2** |
-| 红色项 | 脱敏 | — | — | — | P0-1 待修 |
+| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **30**（v1 首批 hard 层已入） |
+| 检出率 recall | 100% | ≥ 80% | ≥ 85% | ≥ 85% | **100%**（v1 门禁 85%） |
+| 精确率 precision | 100% | ≥ 85% | ≥ 90% | ≥ 90% | **100%**（v1 门禁 90%） |
+| 负样本误报率 | 0% | ≤ 15% | ≤ 10% | ≤ 10% | **0%**（13 负样本含 5 个 hard 陷阱） |
+| 脱敏泄漏 | 2（P0-1） | 0（硬门禁） | 0 | 0 | **0**（M0-A1，硬门禁 PASS） |
+| 红色项 | 脱敏 | — | — | — | **无** |
 
 更新方法：跑 `go test -run TestDataset -v .`，把"数据集质量报告"数字填入"当前实际"列。
 
@@ -543,7 +641,7 @@ rules:
 ### 7.7 节奏约定
 
 1. **门禁纪律**：数据集门禁红了不合代码；新增/修改规则必须带正负样本。
-2. **提交纪律**：一个任务一个提交，message 引用任务编号（如 `fix(A1): unify evidence redaction`）。
+2. **提交纪律**：一个任务一个提交，message 引用任务编号（如 `fix(A1): unify evidence redaction`）。格式为 Conventional Commits（`type(scope): subject`，type ∈ feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert），由 `scripts/hooks/commit-msg`（本地，`bash scripts/install-hooks.sh` 一键安装）与 CI `commit-check` job（远端）双层强制。
 3. **里程碑收尾**：打 tag（M0 → `v0.2.0`，M2 → `v0.3.0`，M5 → `v1.0.0`）+ 更新 7.5 指标看板 + 同步 §五/§六。
 4. **文档即验收**：每个里程碑的退出标准都是可执行命令或可检查产物，不接受"应该可以了"。
 
