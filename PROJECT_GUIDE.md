@@ -295,7 +295,7 @@ rules:
 | # | 能力 | 状态 | 证据 / 差距 |
 |---|------|------|------------|
 | 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**（`skill.NewFSRepository` → 报告 `skill` 字段含 name/version/loaded）；规则 ≥4 类要求达成（实际覆盖 6 类） |
-| 2 | 沙箱执行（container/e2b，local 仅 fallback） | ✅ | container 手写版 ✅（全套隔离 flags）；**M3 补齐：container-fx（框架 Docker SDK，同套隔离配置）与 e2b 云沙箱（E2B_API_KEY，仓库 staging 上传，E2B_TEMPLATE 选 Go 模板）均已实现**，均带回退链；实机验证待 Docker/E2B 环境 |
+| 2 | 沙箱执行（container/e2b，local 仅 fallback） | ✅ | container 手写版 ✅；container-fx（框架 Docker SDK）✅ **CI 实机验证**（网络隔离/只读/非 root/env 白名单）；e2b 云沙箱 ✅ **实机验证**（创建/staging/执行/脱敏/审计；Go 模板需 E2B_TEMPLATE）；均带回退链 |
 | 3 | 工具链接入（高风险命令先过 PermissionPolicy） | ✅ | **M1-B2 起走框架权限体系**：`SafetyFilter.AsPermissionPolicy()` → `tool.PermissionPolicy`，每条沙箱命令经 `policy.CheckToolPermission`，deny/ask 不进沙箱，决策落 `cr_permission_decisions`；命令面仍为 2 条固定命令 |
 | 4 | 输入解析（unified diff / 文件列表 / git 工作区） | ✅ | diff 文件 ✅、git 工作区 ✅、**文件路径列表 ✅（M2-D5 `--files`/`ReadFromFilePaths`，整体按新增行审查）** |
 | 5 | 结构化 findings（10 个字段） | ✅ | severity/category/file/line/title/evidence/recommendation/confidence/source/rule_id 全齐 |
@@ -467,7 +467,7 @@ rules:
 > - ✅ **evidence_chain 完成（2026-09-27）**：`findings.Finding.EvidenceChain`（json omitempty）+ `BuildEvidenceChain(file, line, ruleID, fact, confidence)` 四步链（hunk→fact→rule→confidence），链中只含定位/事实类型/规则/置信度、**不携带代码内容值**（与统一 Redactor 同一纪律）；12 个产生点全部填充（SEC×3/GOR/RES/ERR×4/TST×2/DB×1）。测试：findings 层 2 用例（结构/JSON 序列化）+ rules 层专项（链 ≥4 步、无明文密钥、含 hunk/rule 步骤）+ 数据集脱敏门禁扩展到 evidence_chain。
 > - ✅ **门禁升级 v1 并达标（2026-09-27）**：门禁阈值 0.80/0.85/0.15 → **0.85/0.90/0.10**。实测（30 样本 = 17 正 + 13 负含 5 hard 陷阱）：**TP=24 FN=0 FP=0，recall 100%、precision 100%、negFPR 0%**，脱敏 0 泄漏（含 evidence_chain 检查）。全量回归 12 包 `-race` 全绿。
 
-#### M3 · 沙箱生产化（原计划 2026-10-30 → 11-12，约 16h）✅ 已完成（2026-09-27；Docker 沙箱经 CI 实机验证，仅 E2B 实机待 key）
+#### M3 · 沙箱生产化（原计划 2026-10-30 → 11-12，约 16h）✅ 已完成（2026-09-27；Docker 与 E2B 均经实机验证）
 
 | 任务 | 产出 |
 |------|------|
@@ -484,7 +484,7 @@ rules:
 > - ✅ **D2 staticcheck 接入完成（2026-09-27）**：沙箱命令列表加 `staticcheck ./...`（镜像内已预装；本地未装则记录失败不影响流程，exit 127 实测）；新增 `review/staticcheck.go`——输出解析为 findings（`STATICCHECK-<code>` 规则 ID、`source: "tool:staticcheck"`、severity low、category **quality**（新分类，不参与评分维度）、confidence 0.95、带证据链），exit 0/1 均解析（1=发现问题），并入去重。测试 3 用例（解析/空输出/汇总）。**报告中出现 staticcheck 发现在有该工具的沙箱环境生效**（本地无 staticcheck，解析逻辑单测覆盖）。
 > - ✅ **沙箱限制测试集完成（2026-09-27）**：新增 `sandbox/limits_test.go` 8 用例——超时/输出截断/env 透传与脱敏兜底（local，PASS）；env 白名单（手写容器）、网络隔离/只读 rootfs/非 root（container-fx），**Docker 不可用时自动 SKIP**（本机 Docker daemon 未运行，4 个容器用例 SKIP）；E2B 无 key 优雅失败（PASS）。
 >
-> **⚠️ M3 退出标准验证状态（更新于推送后）**：① `--repo-path` 全链路 local 路径实测通过；**Docker 沙箱已由 GitHub Actions（ubuntu runner 自带 Docker）实机验证**——沙箱限制测试集在 CI 真跑，**首轮自举即暴露 2 个本地测不到的问题**（env 探测断言被统一脱敏器掩盖、container-fx 空 repoPath 生成非法 bind），修复（`99d699a`）后网络隔离/只读 rootfs/非 root/env 白名单 **4 个容器用例全部 PASS**——CI 自举第一口狗粮就抓到了真 bug；② E2B 实机验证仍待 `E2B_API_KEY`；③ staticcheck 实机输出验证待沙箱镜像环境（解析链路已单测覆盖）。
+> **⚠️ M3 退出标准验证状态（更新于推送后）**：① `--repo-path` 全链路 local 路径实测通过；**Docker 沙箱已由 GitHub Actions（ubuntu runner 自带 Docker）实机验证**——沙箱限制测试集在 CI 真跑，**首轮自举即暴露 2 个本地测不到的问题**（env 探测断言被统一脱敏器掩盖、container-fx 空 repoPath 生成非法 bind），修复（`99d699a`）后网络隔离/只读 rootfs/非 root/env 白名单 **4 个容器用例全部 PASS**——CI 自举第一口狗粮就抓到了真 bug；② E2B 实机验证已完成（2026-09-27，真实 key）：云端沙箱创建/仓库 staging 上传/命令执行/输出脱敏/审计落库全链路通过（9s），默认模板无 Go 工具链（go test/staticcheck exit 127 优雅记录；go vet 出现模板 shell 的 "Restarting Bash" 假成功——E2B 模板 quirk，真实 Go 审查需 `E2B_TEMPLATE` 指定 Go 模板）；③ staticcheck 实机输出验证待沙箱镜像环境（解析链路已单测覆盖）。
 
 #### M4 · Agent 升级（原计划 2026-11-13 → 11-26，约 24h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
