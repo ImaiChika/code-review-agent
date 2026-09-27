@@ -21,11 +21,9 @@ printf 'module fixture\n\ngo 1.21\n' > "$work/fixture/go.mod"
 cat > "$work/fixture/main.go" <<'FIXTURE'
 package main
 
-func main() {
-	x := 1
-	_ = x    // x 被读取过：编译通过
-	x = 2    // SA4006: this assignment to x is never used
-}
+func main() {}
+
+func unusedHelper() {} // U1000: func unusedHelper is unused
 FIXTURE
 
 cd "$work/fixture"
