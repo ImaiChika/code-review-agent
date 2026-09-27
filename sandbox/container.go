@@ -38,7 +38,13 @@ type ContainerSandbox struct {
 //   - image: Docker 镜像名，如 "golang:1.21-alpine"
 func NewContainerSandbox(image string) (*ContainerSandbox, error) {
 	if image == "" {
-		image = "golang:1.21-alpine"
+		// M3-D2：默认优先使用仓库 Dockerfile 构建的 cr-sandbox（预装 staticcheck/golangci-lint），
+		// 本地未构建时回退到裸 golang 镜像（staticcheck 会优雅降级为 127 记录）
+		if out, err := exec.Command("docker", "image", "inspect", "cr-sandbox").Output(); err == nil && len(out) > 0 {
+			image = "cr-sandbox"
+		} else {
+			image = "golang:1.21-alpine"
+		}
 	}
 
 	// 检查 Docker 是否可用
@@ -71,12 +77,12 @@ func (s *ContainerSandbox) Execute(ctx context.Context, opts ExecuteOptions) (*E
 	// 构建 docker run 命令
 	args := []string{
 		"run",
-		"--rm",                     // 用完自动删除容器
-		"--network=none",           // 禁止网络
-		"--memory=512m",            // 限制内存
-		"--cpus=1",                 // 限制 CPU
-		"--read-only",              // 只读文件系统
-		"--tmpfs", "/tmp:size=64m", // 临时可写目录
+		"--rm",                                          // 用完自动删除容器
+		"--network=none",                                // 禁止网络
+		"--memory=512m",                                 // 限制内存
+		"--cpus=1",                                      // 限制 CPU
+		"--read-only",                                   // 只读文件系统
+		"--tmpfs", "/tmp:size=256m,uid=65532,gid=65532", // 临时可写目录（go 构建缓存用）
 		"--user", "65532:65532", // 非 root 用户
 	}
 
@@ -86,8 +92,8 @@ func (s *ContainerSandbox) Execute(ctx context.Context, opts ExecuteOptions) (*E
 		args = append(args, "-w", "/workspace")
 	}
 
-	// 环境变量白名单
-	env := safety.NewSafetyFilter(nil).FilterEnvVars(opts.Env)
+	// 环境变量白名单 + 可写缓存默认值（非 root + 只读 rootfs 下 go 工具链必需）
+	env := defaultSandboxEnv(safety.NewSafetyFilter(nil).FilterEnvVars(opts.Env))
 	for k, v := range env {
 		args = append(args, "-e", k+"="+v)
 	}

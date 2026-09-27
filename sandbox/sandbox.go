@@ -75,3 +75,21 @@ func (opts *ExecuteOptions) Validate() error {
 	}
 	return nil
 }
+
+// defaultSandboxEnv 为容器类沙箱补齐可写 HOME/GOCACHE 默认值。
+//
+// 容器以非 root（65532）+ 只读 rootfs 运行，go 工具链（vet/test/staticcheck）
+// 需要可写的构建缓存目录，否则以缓存错误失败；两者均落在 tmpfs /tmp。
+func defaultSandboxEnv(env map[string]string) map[string]string {
+	out := make(map[string]string, len(env)+2)
+	for k, v := range env {
+		out[k] = v
+	}
+	if _, ok := out["HOME"]; !ok {
+		out["HOME"] = "/tmp"
+	}
+	if _, ok := out["GOCACHE"]; !ok {
+		out["GOCACHE"] = "/tmp/.cache/go-build"
+	}
+	return out
+}

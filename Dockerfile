@@ -13,10 +13,10 @@
 
 FROM golang:1.21-alpine
 
-# 安装静态分析工具
+# 安装静态分析工具（版本固定：需与基础镜像 go1.21 兼容）
 RUN apk add --no-cache git && \
-    go install honnef.co/go/tools/cmd/staticcheck@latest && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.4.7 && \
+    CGO_ENABLED=0 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
 
 # 创建非 root 用户
 RUN adduser -D -u 65532 reviewer

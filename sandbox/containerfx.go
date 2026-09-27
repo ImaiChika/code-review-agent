@@ -66,7 +66,7 @@ func NewFrameworkContainerSandbox(repoPath string) (*FrameworkContainerSandbox, 
 			Privileged:     false,
 			NetworkMode:    "none",
 			ReadonlyRootfs: true,
-			Tmpfs:          map[string]string{"/tmp": "size=64m"},
+			Tmpfs:          map[string]string{"/tmp": "size=256m,uid=65532,gid=65532"},
 			Resources: dockercontainer.Resources{
 				Memory:   512 << 20, // 512m
 				NanoCPUs: 1e9,       // 1 CPU
@@ -102,7 +102,7 @@ func (s *FrameworkContainerSandbox) Execute(ctx context.Context, opts ExecuteOpt
 	spec := codeexecutor.RunProgramSpec{
 		Cmd:     "sh",
 		Args:    []string{"-c", opts.Command},
-		Env:     opts.Env,
+		Env:     defaultSandboxEnv(opts.Env),
 		Timeout: opts.Timeout,
 	}
 
