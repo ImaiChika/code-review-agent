@@ -49,7 +49,7 @@ cp "$out/review_report.json" .run/staticcheck-live/
 python3 - "$out/review_report.json" <<'PYASSERT'
 import json, sys
 r = json.load(open(sys.argv[1]))
-allf = r["findings"] + r.get("warnings", [])
+allf = (r.get("findings") or []) + (r.get("warnings") or [])  # Go nil slice → JSON null
 sc = [f for f in allf if f["rule_id"].startswith("STATICCHECK-")]
 print("STATICCHECK 发现:", [(f["rule_id"], f["file"], f["line"], f["source"]) for f in sc])
 assert sc, "报告未出现 STATICCHECK-* 发现（D2 实机验证失败）"
