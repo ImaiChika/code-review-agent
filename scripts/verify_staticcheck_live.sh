@@ -16,9 +16,43 @@ docker build -q -t cr-sandbox . >/dev/null
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# fixture：已知 staticcheck 问题（SA4006: value never used）
 mkdir -p "$work/fixture"
-cat > "$work/fixture/go.mod" <<'EOF'
-module fixture
+printf 'module fixture\n\ngo 1.21\n' > "$work/fixture/go.mod"
+cat > "$work/fixture/main.go" <<'FIXTURE'
+package main
 
-go 1.21
+func main() {
+	x := 1
+	x = 2 // SA4006: this value of x is never used
+}
+FIXTURE
+
+cd "$work/fixture"
+git init -q .
+git config user.email t@t
+git config user.name t
+git add . && git commit -qm "chore: baseline"
+printf '\n// trigger non-empty diff\n' >> main.go
+
+mkdir -p "$work/out"
+
+cd "$root"
+echo "▶ 自举审查（--repo-path + --sandbox container，镜像应选 cr-sandbox）…"
+./code-review-agent --repo-path "$work/fixture" --sandbox container --db "$work/review.db" --output "$out"
+
+echo "▶ 沙箱命令执行情况："
+sqlite3 "$work/review.db" "SELECT command, backend, exit_code FROM cr_sandbox_runs;"
+
+mkdir -p .run/staticcheck-live
+cp "$out/review_report.json" .run/staticcheck-live/
+
+python3 - "$out/review_report.json" <<'PYASSERT'
+import json, sys
+r = json.load(open(sys.argv[1]))
+allf = r["findings"] + r.get("warnings", [])
+sc = [f for f in allf if f["rule_id"].startswith("STATICCHECK-")]
+print("STATICCHECK 发现:", [(f["rule_id"], f["file"], f["line"], f["source"]) for f in sc])
+assert sc, "报告未出现 STATICCHECK-* 发现（D2 实机验证失败）"
+PYASSERT
+
+echo "✓ staticcheck 实机验证通过（报告见 .run/staticcheck-live/review_report.json）"

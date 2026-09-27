@@ -84,3 +84,24 @@ jobs:
         with:
           name: self-review-report
           path: self-review/
+
+  sandbox-staticcheck:
+    name: 沙箱实机验证（Docker + staticcheck）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: cr-sandbox 镜像构建 + staticcheck 实机验证
+        run: scripts/verify_staticcheck_live.sh
+
+      - name: 上传验证报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staticcheck-live-report
+          path: .run/staticcheck-live/review_report.json
+          if-no-files-found: ignore
