@@ -66,7 +66,7 @@ func NewFrameworkContainerSandbox(repoPath string) (*FrameworkContainerSandbox, 
 			Privileged:     false,
 			NetworkMode:    "none",
 			ReadonlyRootfs: true,
-			Tmpfs:          map[string]string{"/tmp": "size=256m,uid=65532,gid=65532"},
+			Tmpfs:          map[string]string{"/tmp": "size=256m,mode=1777"},
 			Resources: dockercontainer.Resources{
 				Memory:   512 << 20, // 512m
 				NanoCPUs: 1e9,       // 1 CPU

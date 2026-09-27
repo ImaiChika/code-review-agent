@@ -34,14 +34,15 @@ git config user.name t
 git add . && git commit -qm "chore: baseline"
 printf '\n// trigger non-empty diff\n' >> main.go
 
-mkdir -p "$work/out"
+out="$work/out"
+mkdir -p "$out"
 
 cd "$root"
 echo "▶ 自举审查（--repo-path + --sandbox container，镜像应选 cr-sandbox）…"
 ./code-review-agent --repo-path "$work/fixture" --sandbox container --db "$work/review.db" --output "$out"
 
-echo "▶ 沙箱命令执行情况："
-sqlite3 "$work/review.db" "SELECT command, backend, exit_code FROM cr_sandbox_runs;"
+echo "▶ 沙箱命令执行情况（含输出首行，用于诊断）："
+sqlite3 "$work/review.db" "SELECT command || ' => exit ' || exit_code || ' | ' || substr(replace(output, char(10), ' / '), 1, 200) FROM cr_sandbox_runs;"
 
 mkdir -p .run/staticcheck-live
 cp "$out/review_report.json" .run/staticcheck-live/
