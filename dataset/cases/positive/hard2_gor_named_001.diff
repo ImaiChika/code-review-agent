@@ -1,0 +1,14 @@
+--- a/serve.go
++++ b/serve.go
+@@ -1,2 +1,11 @@
+ package serve
+ 
++func serve(l net.Listener) {
++    for {
++        conn, err := l.Accept()
++        if err != nil {
++            continue
++        }
++        go handleConn(conn)
++    }
++}

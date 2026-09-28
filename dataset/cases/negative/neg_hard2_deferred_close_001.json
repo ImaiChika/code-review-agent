@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard2_deferred_close_001",
+  "description": "陷阱：os.Open + 错误检查 + defer Close 完整配对，且返回值正确处理——干净代码",
+  "category": "none",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

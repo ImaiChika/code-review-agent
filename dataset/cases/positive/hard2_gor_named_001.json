@@ -1,0 +1,11 @@
+{
+  "id": "hard2_gor_named_001",
+  "description": "accept 循环里 go 具名函数处理连接，hunk 内无 ctx/cancel/errgroup 等退出机制（具名函数体不在变更中，按保守上报语义应报）",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "GOR-AST-001", "file": "serve.go", "line": 9}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

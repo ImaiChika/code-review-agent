@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard2_readfile_wrapped_001",
+  "description": "陷阱：os.ReadFile 是一次性自关闭 API（内部管理句柄），不应按资源泄漏上报；错误用 %w 正确包装",
+  "category": "none",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

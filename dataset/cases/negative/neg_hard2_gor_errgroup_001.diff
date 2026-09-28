@@ -1,0 +1,12 @@
+--- a/pipeline.go
++++ b/pipeline.go
+@@ -1,2 +1,9 @@
+ package pipeline
+ 
++func run(ctx context.Context) error {
++    g, ctx := errgroup.WithContext(ctx)
++    g.Go(func() error {
++        return worker(ctx)
++    })
++    return g.Wait()
++}

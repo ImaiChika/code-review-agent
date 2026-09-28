@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard2_placeholder_url_001",
+  "description": "陷阱：URL 内嵌 token 参数但值为占位符（your-token-here / example.com），文档示例代码——不应报泄漏",
+  "category": "none",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

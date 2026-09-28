@@ -1,0 +1,12 @@
+--- a/api/user.go
++++ b/api/user.go
+@@ -1,2 +1,9 @@
+ package api
+ 
++func getUser(id int) (*User, error) {
++    u, err := store.Find(id)
++    if err != nil {
++        panic("query failed: " + err.Error())
++    }
++    return u, nil
++}

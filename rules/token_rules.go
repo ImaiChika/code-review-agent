@@ -13,6 +13,7 @@ package rules
 import (
 	"go/scanner"
 	"go/token"
+	"regexp"
 	"strings"
 
 	"code-review-agent/analyzer"
@@ -438,7 +439,10 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 		for i, content := range addedLines {
 			for call, closeMethod := range resourceOpenCalls {
 				if strings.Contains(content, call) {
-					if !hasCloseInLines(fileLines, closeMethod) {
+					// 构造器语义：句柄被 return 交给调用方时关闭责任已转移，不算本函数泄漏
+					handleVar := strings.TrimSuffix(extractVarNameToken(content), ".")
+					if !hasCloseInLines(fileLines, closeMethod) &&
+						!ownershipTransferredByReturn(fileLines, handleVar) {
 						f := findings.NewFinding(
 							r.Severity(), r.Category(), r.ID(),
 							"Token 感知：资源可能未关闭",
@@ -467,6 +471,31 @@ func hasCloseInLines(lines []string, closeMethod string) bool {
 			return true
 		}
 		if strings.Contains(line, closeMethod) && strings.Contains(line, "Close") {
+			return true
+		}
+	}
+	return false
+}
+
+// ownershipTransferredByReturn 判断资源句柄变量是否被 return 交给调用方。
+// 构造器模式（打开资源后直接 return 句柄，如 func open() (*os.File, error)）
+// 的关闭责任在调用方，不应按本函数泄漏上报。
+// varName 作为方法接收者出现（如 return db.Ping() 里的 db.）不算返回句柄本身，
+// 匹配前先剔除 "varName." 前缀的出现，再看剩余部分是否仍有裸 varName。
+func ownershipTransferredByReturn(lines []string, varName string) bool {
+	if varName == "" {
+		return false
+	}
+	re, err := regexp.Compile(`\breturn\b[^\n]*\b` + regexp.QuoteMeta(varName) + `\b`)
+	if err != nil {
+		return false
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, "return") {
+			continue
+		}
+		stripped := strings.ReplaceAll(line, varName+".", "")
+		if re.MatchString(stripped) {
 			return true
 		}
 	}

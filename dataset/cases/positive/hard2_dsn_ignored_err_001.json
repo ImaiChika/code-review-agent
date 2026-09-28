@@ -1,0 +1,12 @@
+{
+  "id": "hard2_dsn_ignored_err_001",
+  "description": "同一行双重问题：_ 丢弃 sql.Open 的 error + 连接串内嵌生产口令（URL 内嵌凭据泄漏）",
+  "category": "sensitive_leak",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "ERR-AST-001", "file": "store/db.go", "line": 4},
+    {"rule_id": "SEC-AST-002", "file": "store/db.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": ["Pr0d-P@ss"]
+}

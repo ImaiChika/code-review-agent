@@ -1,0 +1,13 @@
+--- a/readall.go
++++ b/readall.go
+@@ -1,2 +1,10 @@
+ package readall
+ 
++func readAll(path string) ([]byte, error) {
++    f, err := os.Open(path)
++    if err != nil {
++        return nil, err
++    }
++    defer f.Close()
++    return io.ReadAll(f)
++}

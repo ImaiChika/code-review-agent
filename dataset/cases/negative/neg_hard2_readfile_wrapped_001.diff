@@ -1,0 +1,12 @@
+--- a/config.go
++++ b/config.go
+@@ -1,2 +1,9 @@
+ package config
+ 
++func load(path string) (*Config, error) {
++    b, err := os.ReadFile(path)
++    if err != nil {
++        return nil, fmt.Errorf("read config: %w", err)
++    }
++    return parse(b)
++}

@@ -1,0 +1,11 @@
+{
+  "id": "hard2_lib_logfatal_001",
+  "description": "库代码（非 main）用 log.Fatal 终止进程，应向上返回 error（main 包 log.Fatal 是合法陷阱样本 neg_main_fatal_001 的对照）",
+  "category": "error_handling",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "ERR-AST-001", "file": "pkg/metrics.go", "line": 5}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -344,6 +344,47 @@ func TestTokenResourceRule_HTTPResponseNoClose(t *testing.T) {
 	}
 }
 
+func TestTokenResourceRule_HandleReturnedToCaller(t *testing.T) {
+	// 构造器模式：打开后把句柄 return 给调用方，关闭责任已转移，不应报泄漏
+	input := `--- a/store/db.go
++++ b/store/db.go
+@@ -1,2 +1,6 @@
+ package store
+ 
++func openDB() (*sql.DB, error) {
++    db, err := sql.Open("postgres", dsn)
++    return db, err
++}
+`
+	rule := NewTokenResourceRule()
+	results := checkTokenRule(t, input, rule)
+	if len(results) != 0 {
+		t.Errorf("句柄被 return 给调用方不应报告，发现 %d 个", len(results))
+	}
+}
+
+func TestTokenResourceRule_HandleUsedAsReceiverStillFlagged(t *testing.T) {
+	// return db.Ping() 里的 db 是方法接收者，不是返回句柄本身，仍应报泄漏
+	input := `--- a/store/db.go
++++ b/store/db.go
+@@ -1,2 +1,7 @@
+ package store
+ 
++func probe(dsn string) error {
++    db, err := sql.Open("postgres", dsn)
++    if err != nil {
++        return err
++    }
++    return db.Ping()
++}
+`
+	rule := NewTokenResourceRule()
+	results := checkTokenRule(t, input, rule)
+	if len(results) == 0 {
+		t.Fatal("句柄仅作接收者使用且无 Close，应被检测到")
+	}
+}
+
 // ========== ERR-AST-001: 错误处理 ==========
 
 func TestTokenErrorRule_IgnoredError(t *testing.T) {

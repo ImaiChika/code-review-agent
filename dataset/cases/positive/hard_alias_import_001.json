@@ -1,6 +1,6 @@
 {
   "id": "hard_alias_import_001",
-  "description": "别名导入陷阱：别名 import 本身不触发，真正的资源泄漏是未关闭的 sql.Open（别名行是上下文，不能作为依据）",
+  "description": "别名导入陷阱：别名 import 行本身不触发，真正的资源泄漏是未 Close 的 sql.Open（句柄留在函数内未返回调用方；v2 起构造器 return 句柄按所有权转移豁免，样本函数体已相应调整）",
   "category": "resource",
   "difficulty": "hard",
   "expected_findings": [

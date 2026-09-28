@@ -1,0 +1,12 @@
+{
+  "id": "hard2_two_files_mixed_001",
+  "description": "双文件混合变更：creds.go 硬编码密码 + loader.go 打开文件无 Close（标注先于实现，v2-hard 批次）",
+  "category": "security",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-001", "file": "creds.go", "line": 3},
+    {"rule_id": "RES-AST-001", "file": "loader.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": ["sup3rs3cret-prod-pw"]
+}

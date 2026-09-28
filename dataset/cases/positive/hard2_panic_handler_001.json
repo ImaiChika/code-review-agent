@@ -1,0 +1,11 @@
+{
+  "id": "hard2_panic_handler_001",
+  "description": "业务代码用 panic 处理可预期错误（应返回 error 而非 panic；main/初始化路径除外）",
+  "category": "error_handling",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "ERR-AST-001", "file": "api/user.go", "line": 6}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

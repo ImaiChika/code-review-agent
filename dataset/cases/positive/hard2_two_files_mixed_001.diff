@@ -1,0 +1,16 @@
+--- a/creds.go
++++ b/creds.go
+@@ -1,2 +1,3 @@
+ package creds
+ 
++var dbPassword = "sup3rs3cret-prod-pw"
+--- a/loader.go
++++ b/loader.go
+@@ -1,2 +1,8 @@
+ package loader
+ 
++func load(path string) ([]byte, error) {
++    f, err := os.Open(path)
++    if err != nil {
++        return nil, err
++    }

@@ -1,0 +1,10 @@
+--- a/pkg/metrics.go
++++ b/pkg/metrics.go
+@@ -1,2 +1,7 @@
+ package metrics
+ 
++func record(m Metric) {
++    if m == nil {
++        log.Fatal("nil metric")
++    }
++}

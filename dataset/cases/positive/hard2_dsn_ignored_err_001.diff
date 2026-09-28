@@ -1,0 +1,9 @@
+--- a/store/db.go
++++ b/store/db.go
+@@ -1,2 +1,6 @@
+ package store
+ 
++func openDB() *sql.DB {
++    db, _ := sql.Open("postgres", "postgres://svc:Pr0d-P@ss@10.0.0.8:5432/app")
++    return db
++}

@@ -1,0 +1,9 @@
+{
+  "id": "neg_hard2_gor_errgroup_001",
+  "description": "陷阱：goroutine 由 errgroup.WithContext 管理，ctx 传递到 worker，具备退出机制——不应报 goroutine 泄漏",
+  "category": "none",
+  "difficulty": "hard",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

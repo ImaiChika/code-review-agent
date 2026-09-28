@@ -1,0 +1,6 @@
+--- a/client.go
++++ b/client.go
+@@ -1,2 +1,3 @@
+ package client
+ 
++const demoEndpoint = "https://example.com/api?token=your-token-here"
