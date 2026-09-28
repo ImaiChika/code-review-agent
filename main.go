@@ -164,18 +164,27 @@ func runServe(args []string) {
 	workers := fs.Int("queue-workers", 1, "异步审查并发 worker 数（M7-F1；默认 1 串行，SQLite 单写最稳）")
 	taskTimeout := fs.Duration("task-timeout", 10*time.Minute, "单个审查任务的看门狗上限（超时标记 failed）")
 	authToken := fs.String("auth-token", "", "写操作认证 token（M7-F2；设置后 POST 需携带 Authorization: Bearer <token> 或 X-Auth-Token，浏览公开；前端用户用 http://host/?token=<token> 链接自动保存）")
+	allowRepos := fs.String("allow-repo", "", "仓库路径白名单前缀（M7-F4；逗号分隔多个，如 /home/work/repos,/opt/projects；空 = 不限制。公网部署强烈建议配置）")
 	fs.Parse(args)
 
+	allowedRepos := []string{}
+	for _, p := range strings.Split(*allowRepos, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			allowedRepos = append(allowedRepos, p)
+		}
+	}
+
 	srv, err := server.New(server.Config{
-		Port:        *port,
-		DBPath:      *dbPath,
-		DataDir:     *dataDir,
-		RulesDir:    *rulesDir,
-		SandboxMode: *sandboxMode,
-		SampleDir:   *sampleDir,
-		Workers:     *workers,
-		TaskTimeout: *taskTimeout,
-		AuthToken:   *authToken,
+		Port:         *port,
+		DBPath:       *dbPath,
+		DataDir:      *dataDir,
+		RulesDir:     *rulesDir,
+		SandboxMode:  *sandboxMode,
+		SampleDir:    *sampleDir,
+		Workers:      *workers,
+		TaskTimeout:  *taskTimeout,
+		AuthToken:    *authToken,
+		AllowedRepos: allowedRepos,
 	})
 	if err != nil {
 		log.Fatalf("初始化服务失败: %v", err)

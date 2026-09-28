@@ -65,6 +65,7 @@ type Config struct {
 	RateBurst     int           // 审查提交限流桶容量（M7-F2；<=0 = 10）
 	MaxBodyBytes  int64         // 请求体上限（M7-F2；<=0 = 10MB）
 	GitHubAPIBase string        // GitHub API 基地址（M7-F3；空 = 官方，测试可注入假服务）
+	AllowedRepos  []string      // M7-F4：仓库路径白名单前缀（空 = 不限制，本地模式；配置后 repo_path 必须落在前缀内）
 }
 
 // 默认请求体上限 10MB：一个审查 diff 的合理上限远小于此。
@@ -230,6 +231,33 @@ func preflightAddedLines(files []diff.FileDiff) error {
 // errNoAddedLines 无新增行（映射 422）。
 var errNoAddedLines = errors.New("diff 中没有可审查的变更（没有任何新增行）")
 
+// normalizeRepoPath 规范化仓库路径：转绝对路径、Clean、确保以 / 结尾边界处理。
+func normalizeRepoPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(abs)
+}
+
+// checkRepoAllowed 校验仓库路径是否在白名单内（M7-F4）。
+// 未配置白名单 = 不限制（本地模式，行为不变）。
+// 匹配规则：路径等于前缀，或位于前缀目录之下（目录边界，/tmp/repos 不放行 /tmp/repositories）；
+// 请求路径先规范化（Abs+Clean），/tmp/allowed/../secret 这类穿越路径规范后落在白名单外即拒绝。
+func (s *Server) checkRepoAllowed(repoPath string) error {
+	if len(s.cfg.AllowedRepos) == 0 {
+		return nil
+	}
+	norm := normalizeRepoPath(repoPath)
+	for _, prefix := range s.cfg.AllowedRepos {
+		p := normalizeRepoPath(prefix)
+		if norm == p || strings.HasPrefix(norm, p+string(filepath.Separator)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("仓库路径不在白名单内（--allow-repo）： %s", repoPath)
+}
+
 func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	// M7-F2：请求体上限（超限 413）
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
@@ -312,6 +340,10 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		inputType, inputPath = "repo_path", req.RepoPath
+		if err := s.checkRepoAllowed(req.RepoPath); err != nil {
+			writeErr(w, http.StatusForbidden, err.Error())
+			return
+		}
 		if _, err := os.Stat(req.RepoPath); err != nil {
 			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": 仓库路径不可访问: "+req.RepoPath)
 			return
