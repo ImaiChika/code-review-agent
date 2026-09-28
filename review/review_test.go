@@ -187,6 +187,42 @@ func TestRun_NoChanges(t *testing.T) {
 	}
 }
 
+// TestRun_ContextOnlyDiff_NoAddedLines M7-F8（P2-10）：
+// 纯上下文 / 纯删除的 diff 能解析出文件但没有新增行，同样返回 ErrNoChanges——
+// 规则只扫新增行，与其产出空报告，不如明确告知调用方没有可审查的变更。
+func TestRun_ContextOnlyDiff_NoAddedLines(t *testing.T) {
+	outDir := t.TempDir()
+	cases := map[string]string{
+		"纯上下文": "--- a/x.go\n+++ b/x.go\n@@ -1,3 +1,3 @@\n package x\n \n func keep() {}\n",
+		"纯删除":  "--- a/x.go\n+++ b/x.go\n@@ -1,3 +1,2 @@\n package x\n \n-func gone() {}\n",
+	}
+	for name, diffText := range cases {
+		_, err := Run(Options{
+			DiffContent: diffText,
+			OutputDir:   outDir,
+			SandboxMode: SandboxOff,
+		})
+		if !errors.Is(err, ErrNoChanges) {
+			t.Errorf("%s diff 应返回 ErrNoChanges, 得到: %v", name, err)
+		}
+	}
+}
+
+// TestRun_InvalidInput M7-F8（P3-12）：输入本身不可用返回 ErrInvalidInput。
+func TestRun_InvalidInput(t *testing.T) {
+	outDir := t.TempDir()
+	cases := map[string]Options{
+		"diff 文件不存在": {DiffFile: "/nonexistent/a.diff", OutputDir: outDir, SandboxMode: SandboxOff},
+		"仓库路径不存在":    {RepoPath: "/nonexistent/repo/xyz", OutputDir: outDir, SandboxMode: SandboxOff},
+	}
+	for name, opts := range cases {
+		_, err := Run(opts)
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s 应返回 ErrInvalidInput, 得到: %v", name, err)
+		}
+	}
+}
+
 // TestRun_FilesList D5 文件列表输入冒烟：整体按新增行审查。
 func TestRun_FilesList(t *testing.T) {
 	dir := t.TempDir()

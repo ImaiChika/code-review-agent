@@ -177,6 +177,22 @@ func TestCreateReview_Validation(t *testing.T) {
 	}
 	res.Body.Close()
 
+	// 纯上下文 diff（可解析但没有新增行）→ 422（M7-F8，P2-10）
+	res, _ = http.Post(ts.URL+"/api/reviews", "application/json",
+		strings.NewReader(`{"diff_content":"--- a/x.go\n+++ b/x.go\n@@ -1,3 +1,3 @@\n package x\n \n func keep() {}\n"}`))
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("纯上下文 diff status = %d, 期望 422", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// 不存在的仓库路径 → 400（M7-F8，P3-12；此前是 500）
+	res, _ = http.Post(ts.URL+"/api/reviews", "application/json",
+		strings.NewReader(`{"repo_path":"/nonexistent/repo/xyz"}`))
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("不存在仓库路径 status = %d, 期望 400", res.StatusCode)
+	}
+	res.Body.Close()
+
 	// GET 方法被拒 → 405
 	res, _ = http.Get(ts.URL + "/api/reviews")
 	if res.StatusCode != http.StatusMethodNotAllowed {

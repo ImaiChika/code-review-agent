@@ -25,6 +25,7 @@ package server
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -210,11 +211,15 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		AuditFile:   "tool_safety_audit.jsonl",
 	})
 	if err != nil {
-		if err == review.ErrNoChanges {
-			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更")
-			return
+		// M7-F8：语义化错误映射——输入不可用 400，合法但无变更 422，其余 500
+		switch {
+		case errors.Is(err, review.ErrNoChanges):
+			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
+		case errors.Is(err, review.ErrInvalidInput):
+			writeErr(w, http.StatusBadRequest, err.Error())
+		default:
+			writeErr(w, http.StatusInternalServerError, err.Error())
 		}
-		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

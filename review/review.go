@@ -92,8 +92,12 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// ErrNoChanges 输入中没有可审查的变更。
+// ErrNoChanges 输入中没有可审查的变更（解析不出文件，或所有文件都没有新增行）。
 var ErrNoChanges = errors.New("没有变更文件")
+
+// ErrInvalidInput 输入本身不可用（diff 文件读取失败 / 仓库路径无效 / 文件列表读取失败）。
+// API 层据此映射 400，与"输入合法但没有变更"（ErrNoChanges → 422）区分。
+var ErrInvalidInput = errors.New("输入不可用")
 
 // SandboxOff 关闭沙箱执行（API 模式默认值；CLI 由 --sandbox flag 控制）。
 const SandboxOff = "off"
@@ -169,7 +173,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		var err error
 		files, err = diff.ReadFromFile(opts.DiffFile)
 		if err != nil {
-			return nil, fmt.Errorf("读取 diff 文件失败: %w", err)
+			return nil, fmt.Errorf("%w: 读取 diff 文件失败: %w", ErrInvalidInput, err)
 		}
 	case opts.DiffContent != "":
 		inputType = "diff_content"
@@ -177,7 +181,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		var err error
 		files, err = diff.ReadFromContent(opts.DiffContent)
 		if err != nil {
-			return nil, fmt.Errorf("解析 diff 内容失败: %w", err)
+			return nil, fmt.Errorf("%w: 解析 diff 内容失败: %w", ErrInvalidInput, err)
 		}
 	case len(opts.Files) > 0:
 		// M2-D5：文件路径列表输入（整体按新增行审查）
@@ -186,7 +190,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		var err error
 		files, err = diff.ReadFromFilePaths(opts.Files)
 		if err != nil {
-			return nil, fmt.Errorf("读取文件列表失败: %w", err)
+			return nil, fmt.Errorf("%w: 读取文件列表失败: %w", ErrInvalidInput, err)
 		}
 	default:
 		inputType = "repo_path"
@@ -194,11 +198,21 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		var err error
 		files, err = diff.ReadFromGitDiff(opts.RepoPath)
 		if err != nil {
-			return nil, fmt.Errorf("读取 git diff 失败: %w", err)
+			return nil, fmt.Errorf("%w: 读取 git diff 失败: %w", ErrInvalidInput, err)
 		}
 	}
 
 	if len(files) == 0 {
+		return nil, ErrNoChanges
+	}
+	// M7-F8（P2-10）：所有文件都没有新增行（纯上下文/纯删除的 diff）时，
+	// 与"解析不出文件"同语义返回 ErrNoChanges——规则只扫新增行，
+	// 空报告不如明确告诉调用方"没有可审查的变更"。
+	addedTotal := 0
+	for i := range files {
+		addedTotal += len(files[i].AddedLines())
+	}
+	if addedTotal == 0 {
 		return nil, ErrNoChanges
 	}
 
