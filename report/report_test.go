@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"code-review-agent/findings"
+	"code-review-agent/scoring"
 )
 
 func newTestReport() *ReviewReport {
@@ -168,5 +169,105 @@ func TestSeverityIcon(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("severityIcon(%q) = %q, 期望 %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// ========== M7-F6：单文件 HTML 报告 ==========
+
+func sampleHTMLReport() *ReviewReport {
+	rep := NewReport("task-html-001", "diff_content", "api-upload")
+	rep.Summary = Summary{
+		TotalFindings: 1, TotalWarnings: 1,
+		BySeverity: map[string]int{"high": 1},
+	}
+	rep.Findings = []findings.Finding{
+		{
+			Severity: "high", Category: "security", RuleID: "SEC-AST-001",
+			Title: "硬编码密钥", File: "creds.go", Line: 3,
+			Evidence:       `var apiKey = "sk-***REDACTED***"`,
+			Recommendation: "改用环境变量",
+			Confidence:     0.9,
+		},
+	}
+	rep.Warnings = []findings.Finding{
+		{Severity: "low", Category: "testing", RuleID: "TST-AST-001",
+			Title: "缺少测试", File: "creds.go", Line: 3, Confidence: 0.65},
+	}
+	rep.Monitor.RiskScore = 42
+	rep.Monitor.RiskGrade = "C"
+	rep.Monitor.RiskBreakdown = map[string]scoring.Dimension{
+		"security": {Name: "安全问题", Weight: 0.30, Score: 40},
+		"resource": {Name: "资源泄漏", Weight: 0.20, Score: 0},
+	}
+	return rep
+}
+
+func TestToHTML_ContainsCoreSections(t *testing.T) {
+	h := sampleHTMLReport().ToHTML()
+
+	checks := []string{
+		"task-html-001",    // 任务 ID
+		"42",               // 风险分
+		"creds.go:3",       // finding 定位
+		"SEC-AST-001",      // 规则
+		"sk-",              // 脱敏后的证据（占位符被高亮 span 包裹，字面串不连续）
+		`class="redacted"`, // 高亮标记存在
+		"改用环境变量",           // 建议
+		"安全问题",             // 六维名称
+		"自动脱敏",             // 页脚声明
+		`lang="zh-CN"`,     // 文档结构
+	}
+	for _, c := range checks {
+		if !strings.Contains(h, c) {
+			t.Errorf("HTML 应包含 %q", c)
+		}
+	}
+	// 明文密钥不可能出现（输入本身就是脱敏后的，但守住 HTML 层不再引入）
+	if strings.Contains(h, "sk-live-") {
+		t.Error("HTML 不应包含明文密钥")
+	}
+}
+
+func TestToHTML_SelfContained(t *testing.T) {
+	h := sampleHTMLReport().ToHTML()
+	// 自包含：不允许外部资源引用（CDN/外链 src/href）——允许 #锚点和相对无协议文本
+	for _, bad := range []string{`src="http`, `href="http`, `src="//`, `href="//`, `@import`} {
+		if strings.Contains(h, bad) {
+			t.Errorf("HTML 报告应自包含，发现外部引用 %q", bad)
+		}
+	}
+	if !strings.Contains(h, "<style>") || !strings.Contains(h, "<script>") {
+		t.Error("CSS/JS 应内联")
+	}
+}
+
+func TestToHTML_EmptyReport(t *testing.T) {
+	rep := NewReport("task-empty", "diff_content", "api-upload")
+	rep.Monitor.RiskScore = 0
+	rep.Monitor.RiskGrade = "A"
+	h := rep.ToHTML()
+	if !strings.Contains(h, "本次审查未发现问题") {
+		t.Error("空报告应有未发现问题提示")
+	}
+	if strings.Contains(h, "风险评分维度") {
+		t.Error("无 breakdown 时不应渲染维度块")
+	}
+	if !strings.Contains(h, "A 级") {
+		t.Error("应包含等级")
+	}
+}
+
+func TestToHTML_HTMLCape(t *testing.T) {
+	rep := NewReport("task-x", "diff_content", "api-upload")
+	rep.Findings = []findings.Finding{
+		{Severity: "high", RuleID: "SEC-1", Title: `<script>alert(1)</script>`,
+			File: "a.go", Line: 1, Evidence: `var s = "<img src=x onerror=alert(2)>"`},
+	}
+	h := rep.ToHTML()
+	if strings.Contains(h, `<script>alert(1)</script>`) {
+		t.Error("标题脚本标签必须被转义")
+	}
+	if strings.Contains(h, `<img src=x`) {
+		t.Error("evidence 必须被转义（无原始 img 标签）")
 	}
 }

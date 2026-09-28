@@ -23,12 +23,12 @@ const (
 
 // artifactExtAllowed 产物扩展名白名单。
 var artifactExtAllowed = map[string]bool{
-	".json": true, ".md": true, ".log": true, ".txt": true,
+	".json": true, ".md": true, ".html": true, ".log": true, ".txt": true,
 }
 
-// collectArtifacts 收集一次审查要入库的产物：报告 JSON/MD（内存内容）+ 沙箱输出。
+// collectArtifacts 收集一次审查要入库的产物：报告 JSON/MD/HTML（内存内容）+ 沙箱输出。
 // 审计日志本身已在磁盘上独立落盘（tool_safety_audit.jsonl），不入产物表。
-func collectArtifacts(taskID string, jsonContent, mdContent []byte, runs []storage.SandboxRun) []storage.Artifact {
+func collectArtifacts(taskID string, jsonContent, mdContent, htmlContent []byte, runs []storage.SandboxRun) []storage.Artifact {
 	now := time.Now()
 	arts := make([]storage.Artifact, 0, 3)
 	add := func(aType, name string, content []byte) {
@@ -47,6 +47,9 @@ func collectArtifacts(taskID string, jsonContent, mdContent []byte, runs []stora
 	}
 	if len(mdContent) > 0 {
 		add("report", "review_report.md", mdContent)
+	}
+	if len(htmlContent) > 0 {
+		add("report", "review_report.html", htmlContent)
 	}
 	if len(runs) > 0 {
 		var buf bytes.Buffer

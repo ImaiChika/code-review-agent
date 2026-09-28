@@ -368,6 +368,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport.Monitor.LLMDropped = llmDropped
 	reviewReport.Monitor.RiskScore = riskScore.Score
 	reviewReport.Monitor.RiskGrade = riskScore.Grade
+	reviewReport.Monitor.RiskBreakdown = riskScore.Breakdown // M7-F6：HTML 报告六维图
 
 	// 填充沙箱执行记录
 	reviewReport.SandboxRuns = make([]report.SandboxRun, len(counters.sandboxRuns))
@@ -423,7 +424,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		reviewReport.Skill = LoadSkillMeta(skillsDir)
 	}
 
-	var jsonPath, mdPath string
+	var jsonPath, mdPath, htmlPath string
 	// writeReports 把（当前内存状态的）报告写盘；产物计数更新后需再次调用，
 	// 保证文件与库中的 artifacts_saved/rejected 是最终值。
 	writeReports := func() error {
@@ -435,8 +436,13 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		if err := reviewReport.WriteMarkdown(mdPath); err != nil {
 			return fmt.Errorf("写入 Markdown 报告失败: %w", err)
 		}
+		// M7-F6：单文件 HTML 报告（自包含、离线可转发）
+		htmlPath = filepath.Join(opts.OutputDir, "review_report.html")
+		if err := os.WriteFile(htmlPath, []byte(reviewReport.ToHTML()), 0644); err != nil {
+			return fmt.Errorf("写入 HTML 报告失败: %w", err)
+		}
 		if opts.Verbose {
-			fmt.Printf("📝 报告已生成: %s, %s\n", jsonPath, mdPath)
+			fmt.Printf("📝 报告已生成: %s, %s, %s\n", jsonPath, mdPath, htmlPath)
 		}
 		return nil
 	}
@@ -491,7 +497,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("序列化 JSON 报告失败: %w", err)
 		}
-		arts := collectArtifacts(taskID, jsonData, []byte(reviewReport.ToMarkdown()), counters.sandboxRuns)
+		arts := collectArtifacts(taskID, jsonData, []byte(reviewReport.ToMarkdown()), []byte(reviewReport.ToHTML()), counters.sandboxRuns)
 		saved, rejected := saveArtifacts(store, arts)
 		reviewReport.Monitor.ArtifactsSaved = saved
 		reviewReport.Monitor.ArtifactsRejected = len(rejected)

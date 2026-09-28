@@ -90,19 +90,22 @@ func TestSaveArtifacts_CountLimit(t *testing.T) {
 	}
 }
 
-// TestCollectArtifacts 收集逻辑：报告两份 + 有沙箱记录时追加沙箱日志。
+// TestCollectArtifacts 收集逻辑：报告三份（JSON/MD/HTML，M7-F6）+ 有沙箱记录时追加沙箱日志。
 func TestCollectArtifacts(t *testing.T) {
-	// 无沙箱记录 → 2 个产物
-	arts := collectArtifacts("t5", []byte("{}"), []byte("# r"), nil)
-	if len(arts) != 2 {
-		t.Fatalf("无沙箱应收集 2 个产物, 得到 %d", len(arts))
+	// 无沙箱记录 → 3 个产物
+	arts := collectArtifacts("t5", []byte("{}"), []byte("# r"), []byte("<html></html>"), nil)
+	if len(arts) != 3 {
+		t.Fatalf("无沙箱应收集 3 个产物, 得到 %d", len(arts))
+	}
+	if arts[2].FilePath != "review_report.html" {
+		t.Errorf("第三个产物应为 HTML 报告, 得到 %q", arts[2].FilePath)
 	}
 
-	// 有沙箱记录 → 3 个（追加 sandbox_output）
+	// 有沙箱记录 → 4 个（追加 sandbox_output）
 	runs := []storage.SandboxRun{{TaskID: "t5", Command: "go vet ./...", ExitCode: 0, Output: "ok"}}
-	arts = collectArtifacts("t5", []byte("{}"), []byte("# r"), runs)
-	if len(arts) != 3 {
-		t.Fatalf("有沙箱应收集 3 个产物, 得到 %d", len(arts))
+	arts = collectArtifacts("t5", []byte("{}"), []byte("# r"), nil, runs)
+	if len(arts) != 3 { // html 空内容跳过，仍 3 个（json/md/sandbox）
+		t.Fatalf("有沙箱应收集 3 个产物（html 空跳过）, 得到 %d", len(arts))
 	}
 	last := arts[2]
 	if last.ArtifactType != "sandbox_output" || !strings.HasSuffix(last.FilePath, "-sandbox.log") {

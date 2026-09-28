@@ -634,7 +634,8 @@ async function viewTask(taskID) {
     <h2 class="view-title">任务档案</h2>
     <div class="kv" style="margin-bottom:16px">
       <span class="k">任务</span><span class="v mono">${esc(rep.task_id)} · ${esc(rep.input_type)} · ${esc(rep.input_path)} · ${fmtTime(rep.start_time)} → ${esc(rep.duration)} ·
-        <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report">下载报告</a></span>
+        <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report">下载报告</a> ·
+        <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report?format=html" target="_blank">HTML 报告 ${help("新窗口打开自包含 HTML 报告，可直接另存/转发，离线可读")}</a></span>
       ${skillLine}
     </div>
 

@@ -479,7 +479,7 @@ func (s *Server) handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 
 	// /api/tasks/{id} 与 /api/tasks/{id}/report 两个端点
 	if strings.HasSuffix(taskID, "/report") {
-		s.serveTaskReport(w, strings.TrimSuffix(taskID, "/report"))
+		s.serveTaskReport(w, r, strings.TrimSuffix(taskID, "/report"))
 		return
 	}
 
@@ -559,12 +559,27 @@ func (s *Server) handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) serveTaskReport(w http.ResponseWriter, taskID string) {
-	_, mdReport, err := s.store.GetReport(taskID)
-	if err != nil || mdReport == "" {
+func (s *Server) serveTaskReport(w http.ResponseWriter, r *http.Request, taskID string) {
+	jsonReport, mdReport, err := s.store.GetReport(taskID)
+	if err != nil || (mdReport == "" && jsonReport == "") {
 		writeErr(w, http.StatusNotFound, "报告不存在: "+taskID)
 		return
 	}
+
+	// M7-F6：?format=html 即时生成自包含 HTML 报告（浏览器直接打开/转发）
+	if r.URL.Query().Get("format") == "html" {
+		var rep report.ReviewReport
+		if err := json.Unmarshal([]byte(jsonReport), &rep); err != nil {
+			writeErr(w, http.StatusInternalServerError, "解析报告失败: "+err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf("inline; filename=%s.html", taskID))
+		_, _ = w.Write([]byte(rep.ToHTML()))
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.md", taskID))
 	_, _ = w.Write([]byte(mdReport))

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"code-review-agent/findings"
+	"code-review-agent/scoring"
 )
 
 // ReviewReport 表示一次完整的代码审查报告。
@@ -99,21 +100,22 @@ type SandboxRun struct {
 
 // MonitorInfo 记录监控审计信息。
 type MonitorInfo struct {
-	TotalDuration     string  `json:"total_duration"`     // 总耗时
-	RuleDuration      string  `json:"rule_duration"`      // 规则执行耗时
-	SandboxDuration   string  `json:"sandbox_duration"`   // 沙箱执行耗时
-	ToolCallCount     int     `json:"tool_call_count"`    // 工具调用次数
-	RuleCount         int     `json:"rule_count"`         // 规则数量
-	FilesScanned      int     `json:"files_scanned"`      // 扫描文件数
-	PermissionDenied  int     `json:"permission_denied"`  // 权限拦截次数
-	ExceptionCount    int     `json:"exception_count"`    // 异常次数
-	ArtifactsSaved    int     `json:"artifacts_saved"`    // 产物入库数（M1-B5）
-	ArtifactsRejected int     `json:"artifacts_rejected"` // 被限制拒绝的产物数（M1-B5）
-	LLMMode           string  `json:"llm_mode,omitempty"` // LLM 复核模式（M4：空=未启用）
-	LLMReviewed       int     `json:"llm_reviewed"`       // 送审候选数（M4-C1）
-	LLMDropped        int     `json:"llm_dropped"`        // LLM 否决剔除数（M4-C1）
-	RiskScore         float64 `json:"risk_score"`         // 风险评分
-	RiskGrade         string  `json:"risk_grade"`         // 风险等级
+	TotalDuration     string                       `json:"total_duration"`           // 总耗时
+	RuleDuration      string                       `json:"rule_duration"`            // 规则执行耗时
+	SandboxDuration   string                       `json:"sandbox_duration"`         // 沙箱执行耗时
+	ToolCallCount     int                          `json:"tool_call_count"`          // 工具调用次数
+	RuleCount         int                          `json:"rule_count"`               // 规则数量
+	FilesScanned      int                          `json:"files_scanned"`            // 扫描文件数
+	PermissionDenied  int                          `json:"permission_denied"`        // 权限拦截次数
+	ExceptionCount    int                          `json:"exception_count"`          // 异常次数
+	ArtifactsSaved    int                          `json:"artifacts_saved"`          // 产物入库数（M1-B5）
+	ArtifactsRejected int                          `json:"artifacts_rejected"`       // 被限制拒绝的产物数（M1-B5）
+	LLMMode           string                       `json:"llm_mode,omitempty"`       // LLM 复核模式（M4：空=未启用）
+	LLMReviewed       int                          `json:"llm_reviewed"`             // 送审候选数（M4-C1）
+	LLMDropped        int                          `json:"llm_dropped"`              // LLM 否决剔除数（M4-C1）
+	RiskScore         float64                      `json:"risk_score"`               // 风险评分
+	RiskGrade         string                       `json:"risk_grade"`               // 风险等级
+	RiskBreakdown     map[string]scoring.Dimension `json:"risk_breakdown,omitempty"` // M7-F6：六维得分（HTML 报告用）
 }
 
 // NewReport 创建一个新的审查报告。
