@@ -194,7 +194,7 @@ function hbar(label, n, max, color, isText) {
 function pipelineHTML() {
   const steps = [
     ["STEP-1", "输入解析", "unified diff / git 工作区 / API 上传"],
-    ["STEP-2", "规则装载", "6 条内置规则 + YAML 自定义规则"],
+    ["STEP-2", "规则装载", "7 条内置规则 + YAML 自定义规则"],
     ["STEP-3", "规则审查", "go/scanner 词法事实匹配新增行"],
     ["STEP-3.5", "沙箱执行", "go vet / go test，先过权限策略"],
     ["STEP-4", "去重降噪", "同键去重，低置信度转警告"],
