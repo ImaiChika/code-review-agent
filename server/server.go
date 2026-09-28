@@ -51,23 +51,33 @@ const Version = "1.0.0"
 
 // Config 服务配置。
 type Config struct {
-	Port        int           // HTTP 端口
-	DBPath      string        // SQLite 路径
-	DataDir     string        // 审查产物目录（报告/审计日志）
-	RulesDir    string        // YAML 自定义规则目录（可空）
-	SandboxMode string        // 仓库审查的沙箱模式：off / container / local
-	SampleDir   string        // 示例 diff 目录（可空）
-	Workers     int           // 异步审查并发 worker 数（M7-F1；<1 = 1，默认串行执行）
-	TaskTimeout time.Duration // 单任务看门狗上限（M7-F1；<=0 = 10 分钟）
+	Port         int           // HTTP 端口
+	DBPath       string        // SQLite 路径
+	DataDir      string        // 审查产物目录（报告/审计日志）
+	RulesDir     string        // YAML 自定义规则目录（可空）
+	SandboxMode  string        // 仓库审查的沙箱模式：off / container / local
+	SampleDir    string        // 示例 diff 目录（可空）
+	Workers      int           // 异步审查并发 worker 数（M7-F1；<1 = 1，默认串行执行）
+	TaskTimeout  time.Duration // 单任务看门狗上限（M7-F1；<=0 = 10 分钟）
+	AuthToken    string        // 写操作认证 token（M7-F2；空 = 不启用认证）
+	RatePerSec   float64       // 审查提交限流速率/每 IP（M7-F2；<=0 = 2）
+	RateBurst    int           // 审查提交限流桶容量（M7-F2；<=0 = 10）
+	MaxBodyBytes int64         // 请求体上限（M7-F2；<=0 = 10MB）
 }
+
+// 默认请求体上限 10MB：一个审查 diff 的合理上限远小于此。
+const defaultMaxBodyBytes = 10 << 20
 
 // Server 代码审查 HTTP 服务。
 type Server struct {
-	cfg   Config
-	store storage.Store
-	mux   *http.ServeMux
-	srv   *http.Server
-	queue *reviewQueue // M7-F1：异步审查队列（替代原全局互斥的同步执行）
+	cfg     Config
+	store   storage.Store
+	mux     *http.ServeMux
+	srv     *http.Server
+	queue   *reviewQueue   // M7-F1：异步审查队列（替代原全局互斥的同步执行）
+	limiter *ipRateLimiter // M7-F2：审查提交 IP 限流
+	handler http.Handler   // 完整中间件链（Handler() 与 ListenAndServe 共用）
+	maxBody int64          // 生效的请求体上限
 }
 
 // New 创建并初始化服务（打开数据库、注册路由、启动审查 worker）。
@@ -80,24 +90,38 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
 
+	maxBody := cfg.MaxBodyBytes
+	if maxBody <= 0 {
+		maxBody = defaultMaxBodyBytes
+	}
+
 	s := &Server{
-		cfg:   cfg,
-		store: store,
-		mux:   http.NewServeMux(),
+		cfg:     cfg,
+		store:   store,
+		mux:     http.NewServeMux(),
+		limiter: newIPRateLimiter(cfg.RatePerSec, cfg.RateBurst),
+		maxBody: maxBody,
 	}
 	s.queue = newReviewQueue(store, cfg.Workers, cfg.TaskTimeout)
 	s.routes()
+	// 中间件链：安全头 → 写认证 → 路由（限流挂在提交端点上，见 routes）
+	s.handler = secureHeaders(writeAuth(cfg.AuthToken, s.mux))
 	return s, nil
 }
 
 // Handler 返回根 HTTP Handler（供测试与自定义宿主嵌入）。
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.handler }
 
 // ListenAndServe 启动 HTTP 服务（阻塞）。
 func (s *Server) ListenAndServe() error {
 	s.srv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.cfg.Port),
-		Handler: s.mux,
+		Handler: s.handler,
+		// M7-F2：连接层超时——慢连接/慢请求不占用服务资源
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return s.srv.ListenAndServe()
 }
@@ -117,7 +141,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/static/", s.handleStatic)
 	s.mux.HandleFunc("/api/health", s.method("GET", s.handleHealth))
-	s.mux.HandleFunc("/api/reviews", s.method("POST", s.handleCreateReview))
+	// M7-F2：审查提交是重操作，单独包 IP 限流
+	s.mux.Handle("/api/reviews", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleCreateReview))))
 	s.mux.HandleFunc("/api/tasks", s.method("GET", s.handleListTasks))
 	s.mux.HandleFunc("/api/tasks/", s.method("GET", s.handleTaskDetail))
 	s.mux.HandleFunc("/api/stats", s.method("GET", s.handleStats))
@@ -186,8 +211,15 @@ type createReviewRequest struct {
 }
 
 func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
+	// M7-F2：请求体上限（超限 413）
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
 	var req createReviewRequest
 	if err := readJSON(r, &req); err != nil {
+		if bodyTooLarge(err) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("请求体超过上限 %d MB", s.maxBody>>20))
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

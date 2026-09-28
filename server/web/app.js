@@ -11,6 +11,16 @@ const $crumb = document.getElementById("crumb");
 const $statusline = document.getElementById("statusline");
 const $meta = document.getElementById("topbar-meta");
 
+/* ---------- 认证（M7-F2）----------
+   入口链接 http://host/?token=<token> 会自动保存到 localStorage，
+   之后写请求带上 X-Auth-Token；浏览（GET）无需 token。 */
+const urlToken = new URLSearchParams(location.search).get("token");
+if (urlToken) {
+  localStorage.setItem("cra_token", urlToken);
+  history.replaceState(null, "", location.pathname + location.hash); // 清掉地址栏 token，防截图/转发泄漏
+}
+const authToken = localStorage.getItem("cra_token") || "";
+
 /* ---------- 常量映射 ---------- */
 const SEV = {
   high:   { label: "高危", cls: "high" },
@@ -50,7 +60,10 @@ function severityColor(cls) {
   return { high: "var(--red)", medium: "var(--orange)", low: "var(--blue)", info: "var(--ink-dim)" }[cls] || "var(--accent)";
 }
 async function api(path, opts) {
-  const res = await fetch(path, opts);
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers);
+  if (authToken) headers["X-Auth-Token"] = authToken;
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
   const body = await res.json().catch(() => ({ error: "响应解析失败" }));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;

@@ -163,6 +163,7 @@ func runServe(args []string) {
 	sampleDir := fs.String("sample-dir", "testdata", "示例 diff 目录（前端一键演示用，不存在则隐藏示例）")
 	workers := fs.Int("queue-workers", 1, "异步审查并发 worker 数（M7-F1；默认 1 串行，SQLite 单写最稳）")
 	taskTimeout := fs.Duration("task-timeout", 10*time.Minute, "单个审查任务的看门狗上限（超时标记 failed）")
+	authToken := fs.String("auth-token", "", "写操作认证 token（M7-F2；设置后 POST 需携带 Authorization: Bearer <token> 或 X-Auth-Token，浏览公开；前端用户用 http://host/?token=<token> 链接自动保存）")
 	fs.Parse(args)
 
 	srv, err := server.New(server.Config{
@@ -174,6 +175,7 @@ func runServe(args []string) {
 		SampleDir:   *sampleDir,
 		Workers:     *workers,
 		TaskTimeout: *taskTimeout,
+		AuthToken:   *authToken,
 	})
 	if err != nil {
 		log.Fatalf("初始化服务失败: %v", err)
@@ -182,6 +184,9 @@ func runServe(args []string) {
 	fmt.Printf("🚀 Code Review Agent 服务已启动: http://localhost:%d\n", *port)
 	fmt.Printf("   数据库: %s | 产物目录: %s | 审查队列: %d worker, 单任务上限 %s\n",
 		*dbPath, *dataDir, *workers, *taskTimeout)
+	if *authToken != "" {
+		fmt.Printf("   🔐 认证已启用：写操作需 token，带 token 的前端入口 http://localhost:%d/?token=<token>\n", *port)
+	}
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("HTTP 服务退出: %v", err)
 	}
