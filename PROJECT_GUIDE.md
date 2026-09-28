@@ -126,9 +126,10 @@ PORT=9090 scripts/start.sh   # 自定义端口
 ```
 
 - **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
-- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
+- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
 - **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
 - **异步队列（M7-F1）**：`server/queue.go` worker 池（`--queue-workers`，默认 1 串行=SQLite 单写最稳，HTTP 已不被彼此阻塞）；单任务看门狗 `--task-timeout`（默认 10m，超时标 failed 并经 `CreateFailedTask` 补记 DB）；进行中状态在内存注册表（服务重启丢失未完成任务属预期）；runFn 可注入支撑状态机单测；runFn panic 被兜住不影响服务。
+- **认证与边界（M7-F2）**：`server/auth.go`——`--auth-token` 启用写保护（读公开，前端 `?token=<token>` 链接自动保存）；IP 令牌桶限流（2 req/s burst 10）只包提交端点；请求体 ≤10MB（413）；安全响应头 + 连接层超时。全部默认关闭/宽松，不改变旧行为。
 
 ### 2.5 产物
 
@@ -585,7 +586,7 @@ rules:
 | 任务 | 产出 |
 |------|------|
 | F1 异步任务模型 | `POST /api/reviews` → `202 + task_id` 即返回；后台 worker 队列（并发数可配，替代全局互斥）；任务状态机 running/succeeded/failed + 超时回收；前端轮询进度与结果 | ✅ 2026-09-28 |
-| F2 认证与请求边界 | `--auth-token` 管理员认证（写操作需要，浏览可配置公开/只读）；IP 令牌桶限流；`http.MaxBytesReader`（10MB）+ 单请求 context 超时 |
+| F2 认证与请求边界 | `--auth-token` 写操作认证（constant-time，读公开只读）；IP 令牌桶限流（429 + Retry-After）；`MaxBytesReader` 请求体上限（413）；连接层超时 + 安全响应头 | ✅ 2026-09-29 |
 | F3 输入升级（降上手门槛） | 上传 zip / 多文件；粘贴整个文件按"新增行"审查（`--files` 语义 API 化）；GitHub PR URL 拉取（`GITHUB_TOKEN` 可选）——非命令行用户三种零门槛入口 |
 | F4 仓库路径白名单 | `--allow-repo` 前缀白名单 + 路径规范校验，封掉"任意主机路径"暴露面（P3-12）；上传模式作为无白名单时的替代入口 |
 | F5 趋势看板（E3 + 修 P2-11） | 风险分冗余进 `cr_review_tasks`，stats 改 SQL 聚合（按天任务数/评分分布/规则 TopN），前端趋势视图 |
@@ -599,7 +600,8 @@ rules:
 >
 > - ✅ **F8 完成（2026-09-28，首个任务，先行小步验证节奏）**：① `review.ErrInvalidInput` 新哨兵（输入读取失败双重 `%w` 包装），`review.Run` 对 0 新增行 diff（纯上下文/纯删除）返回 `ErrNoChanges`（修 P2-10）；② server 错误三路映射 `errors.Is`：422（无变更，文案"没有任何新增行"）/ 400（输入不可用）/ 500（其余），MCP/CLI 原有处理不变。测试：review 包 +2（`TestRun_ContextOnlyDiff_NoAddedLines`、`TestRun_InvalidInput`）、server Validation +2 场景；全量 13 包 `-race` 全绿、数据集门禁不回退；实机冒烟（API 三态 / 前端错误条 / CLI exit 0|1）全部通过。Version 核查结论：已是单一来源（见 P3-12）。
 > - ✅ **F1 异步任务模型完成（2026-09-28，M7 核心）**：**契约变更**——`POST /api/reviews` 由同步返回报告改为 `202 + {task_id, status:"queued"}`，前端轮询 `GET /api/tasks/{id}` 渲染进度与结果（MCP/CLI 不变仍同步）。实现：`server/queue.go`（worker 池 + 内存注册表 + 看门狗 + runFn 注入 + panic 兜底）；`review.Options.TaskID` 透传预分配 ID（`review.NewTaskID()` 导出）；`storage.CreateFailedTask` 补记失败行；`GET /api/tasks/{id}` 兼容 queued/running（report null）与 failed（error_msg）；入队前同步预检保持 F8 语义（diff 解析+新增行检查→422、repo stat→400），执行期错误落任务状态。配置：serve 新增 `--queue-workers`（默认 1：SQLite 单写最稳，HTTP 已不互相阻塞）、`--task-timeout`（默认 10m）。测试：server 4 个新用例（执行中态可见 / 失败落库 / 超时看门狗 / 提交不被慢任务阻塞，注入 fake runner 确定性验证）+ 全部旧用例迁移到 202 契约；review +2（TaskID 透传 / ID 唯一性）、storage +1（CreateFailedTask）；全量 13 包 `-race` 全绿、数据集门禁不回退。实机验证：并发 3 提交各 **1ms** 拿 202（原同步模式互相阻塞）、repo+沙箱任务执行期间详情返回 running+report null、预检 422/400 保持。**浏览器全流程 + 视觉模型验收发现并修复 3 个前端问题**：① `reviewSource` 全局状态在视图重渲染后残留（切到仓库标签→离开→回来→提交读空输入框直接 return）——viewReview 渲染时重置；② 轮询进度条复用红色 `.notice` 错误样式易误读——新增 `.notice.progress` 中性靛蓝样式（视觉模型确认 #EEF1FE/#4F6BED）；③ 我自己引入的模板字面量多余 `}` 语法错误致整页白屏——`node --check` 抓到，**顺手把 `node --check server/web/app.js` 加进 CI**（此类错误 Go 工具链测不到）。
-> - ⏭ 下一步：F2 认证与请求边界（token / 限流 / MaxBytesReader / 单请求超时）。
+> - ✅ **F2 认证与请求边界完成（2026-09-29）**：新增 `server/auth.go` 三层防线（默认关闭/宽松，旧行为不变）——① `secureHeaders`（nosniff / X-Frame-Options: DENY）；② `--auth-token` 启用后写操作（非 GET/HEAD）必须携带 `Authorization: Bearer` 或 `X-Auth-Token`（constant-time 比较防时序），读端点公开（浏览公开只读模型），401 带 `WWW-Authenticate`；③ IP 令牌桶限流（默认 2 req/s、burst 10，Config 可调），只包审查提交端点，超限 429 + `Retry-After`，惰性 GC 防桶泄漏。请求体上限 `MaxBytesReader`（默认 10MB，超限 **413**——注意 `errors.As` 解包，类型断言匹配不到 `%w` 包装后的错误，单测曾抓到）；`ListenAndServe` 补连接层超时（ReadHeader 10s / Read 30s / Write 60s / Idle 120s）。**前端闭环**：`http://host/?token=<token>` 链接自动存 localStorage 并清掉地址栏 token（防截图/转发泄漏），写请求自动带 `X-Auth-Token`，刷新持久。测试：`auth_test.go` 8 用例（401/两种 token 头/GET 公开/默认不启用/429+Retry-After/IP 隔离/413/安全头）；全量 13 包 `-race` 全绿、数据集门禁不回退。实机冒烟：双实例对照（默认实例行为不变 202；token 实例 401/401/202/GET 200）；连发 15 请求 = 前 10（burst）202 后 5（429）；10MB body 413。浏览器验证：无 token 提交显示 401 提示 → `?token=` 链接进入自动保存 + 地址栏清除 → 提交轮询到完成 → 刷新仍生效 → 无认证实例不受影响。
+> - ⏭ 下一步：F3 零门槛输入（zip/多文件上传、粘贴整文件、GitHub PR URL）。Backlog 新增：W3 敏感标识符词汇表扩展（F2 浏览器验证时发现 `pw` 缩写未命中 SEC-AST-001）。
 
 #### M8 · 智能化增强（v1.2，2026-10-22 → 11-11，约 24h）
 
