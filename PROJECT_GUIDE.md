@@ -2,6 +2,8 @@
 
 > 本文档是对本仓库的**全量体检报告 + 使用指引 + 扩展路线图**，基于 2026-09-22 对全部源码、测试和上层 trpc-agent-go v1.10.0 框架源码的逐文件通读产出。
 >
+> 最近更新：2026-09-28（v1.0 后全量测试 + v2-hard 数据集盲评 + M7/M8 上线与智能化规划）。
+>
 > 阅读对象：未来的自己 / 想在此基础上继续开发的人 / 想快速理解这个项目的人。
 
 ---
@@ -124,8 +126,9 @@ PORT=9090 scripts/start.sh   # 自定义端口
 ```
 
 - **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
-- **API**：`GET /api/health`、`POST /api/reviews`（diff 文本或仓库路径）、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
+- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
 - **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
+- **异步队列（M7-F1）**：`server/queue.go` worker 池（`--queue-workers`，默认 1 串行=SQLite 单写最稳，HTTP 已不被彼此阻塞）；单任务看门狗 `--task-timeout`（默认 10m，超时标 failed 并经 `CreateFailedTask` 补记 DB）；进行中状态在内存注册表（服务重启丢失未完成任务属预期）；runFn 可注入支撑状态机单测；runFn panic 被兜住不影响服务。
 
 ### 2.5 产物
 
@@ -141,10 +144,10 @@ sqlite3 review.db "SELECT severity, rule_id, file_path, line FROM cr_findings WH
 
 ### 2.5 质量评测数据集
 
-根目录 `dataset/` 是带 ground truth 标注的质量评测数据集（v0：20 样本 = 10 正 / 8 误报陷阱 / 2 脱敏），配套 harness `dataset_eval_test.go` 自动输出检出率/精确率/负样本误报率/脱敏泄漏四项指标并断言官方门禁：
+根目录 `dataset/` 是带 ground truth 标注的质量评测数据集（当前 39 样本 = 20 v0 + 10 v1-hard + 9 v2-hard2 批次），配套 harness `dataset_eval_test.go` 自动输出检出率/精确率/负样本误报率/脱敏泄漏四项指标并断言官方门禁：
 
 ```bash
-go test -run TestDataset -v .   # 当前基线：recall 100%、precision 100%、negFPR 0%、脱敏 2 处泄漏（P0-1）
+go test -run TestDataset -v .   # 当前基线：recall 100%、precision 100%、negFPR 0%、脱敏 0 泄漏（39 样本，门禁 85/90/10）
 ```
 
 标注 schema、指标定义、新增样本流程见 `dataset/README.md`；成熟度里程碑与指标看板见本文 §七。
@@ -160,6 +163,7 @@ code-review-agent/
 ├── main.go                 # CLI 入口 + serve 子命令（薄壳，业务全在 review 包）
 ├── review/                 # ★ 审查管线：8 步流程唯一实现，CLI 与 HTTP API 共用
 ├── server/                 # ★ HTTP 服务：REST API + 内嵌 Web 前端（go:embed）
+│   ├── queue.go            #   M7-F1 异步审查队列：worker 池 + 状态机 + 看门狗
 │   └── web/                #   前端三件套（vanilla SPA，零外部依赖）
 ├── scripts/                # ★ start.sh / stop.sh 一键启停；提交规范 hooks
 ├── .github/workflows/      # CI 门禁（gofmt/vet/test-race/数据集/提交校验）
@@ -194,7 +198,7 @@ code-review-agent/
 
 ```
 Step 1  读 diff        --diff-file（读文件）或 --repo-path（exec git diff）
-Step 2  初始化规则引擎  6 条内置规则 + 可选 YAML DSL 规则
+Step 2  初始化规则引擎  7 条内置规则 + 可选 YAML DSL 规则
 Step 3  规则审查       engine.Run(files) → 原始 findings
 Step 3.5 沙箱执行      仅 --repo-path 且非 dry-run 时：
                         对 "go vet ./..." 和 "go test -count=1 -timeout=30s ./..."
@@ -208,7 +212,7 @@ Step 7  落库           task / findings / sandbox_runs / permission_decisions /
 Step 8  汇总输出
 ```
 
-### 3.3 六条内置规则（项目核心资产）
+### 3.3 七条内置规则（项目核心资产）
 
 | 规则 ID | 检测 | 机制要点 | 置信度 |
 |---------|------|---------|--------|
@@ -309,8 +313,8 @@ rules:
 | # | 标准 | 状态 |
 |---|------|------|
 | 1 | 8 条 diff 样本全部可运行 | ✅ 9 个 fixture（多的 sensitive_info），`integration_test.go` 全遍历 |
-| 2 | 高危检出率 ≥ 80%（隐藏样本） | 🟡 无评测集佐证，仅自测置信度设计 |
-| 3 | 误报率 ≤ 15%（隐藏样本） | 🟡 同上；占位符白名单/词边界校验是正向设计 |
+| 2 | 高危检出率 ≥ 80%（隐藏样本） | ✅ 39 样本标注数据集 recall 100%（hard 层 + hard2 盲评批次，标注先于实现） |
+| 3 | 误报率 ≤ 15%（隐藏样本） | ✅ 17 个负样本（含 9 个 hard/hard2 陷阱）误报率 0%；hard2 盲评曾抓出 RES-AST-001 构造器误报并已修复（P2-9） |
 | 4 | 数据库完整记录 + 按 task id 查询 | ✅（artifact 链路除外） |
 | 5 | 沙箱超时/失败不崩溃 | ✅ context.WithTimeout + 容错记录 |
 | 6 | 脱敏检出率 ≥ 95%，报告和 DB **无明文密钥** | ✅ M0-A1 修复：`findings.NewFinding` 出口统一脱敏 + SEC-AST-001 源头脱敏；`TestDatasetRedaction` 0 泄漏硬门禁 PASS |
@@ -382,6 +386,32 @@ rules:
 - `diff/parser.go` 的 `ReadFromGitDiff` 默认只看未暂存变更（`git diff`），暂存区/HEAD 对比需手动传 range，CLI 未暴露参数。
 - `metadata.json` / `.claude/` 是开发工具残留（已 gitignore）。
 
+### 🟡→✅ P2-9 RES-AST-001 构造器所有权转移误报（已修复 2026-09-28，v2-hard2 盲评发现）
+
+`sql.Open`/`os.Open` 等打开后**直接 return 句柄**的构造器模式（`func openDB() (*sql.DB, error) { db, err := sql.Open(...); return db, err }`）被按"资源未关闭"上报——这是正确 Go 惯用法，关闭责任在调用方，属于上线后必然刷屏的误报类型。**发现过程**：hard2 数据集批次盲评（标注先于实现）首次跑出该误报（precision 降至 97%），同时暴露旧样本 `hard_alias_import_001` 把同模式标注为"期望报警"，数据集内部语义矛盾。**修法（已实施）**：`rules/token_rules.go` 新增 `ownershipTransferredByReturn()`——剔除 `varName.` 接收者用法后按词边界匹配 `return ... varName` 即豁免；`return db.Ping()` 类接收者用法仍上报。新增 2 个单测（豁免/不豁免）锁死语义；`hard_alias_import_001` 函数体改为句柄留在函数内（保留别名导入陷阱本意）。修后 39 样本 recall/precision/negFPR = 100%/100%/0%。
+
+### 🟡→✅ P2-10 纯上下文 diff 不触发 422（已修复 2026-09-28，M7-F8）
+
+`review.Run` 只在**解析不出文件**时返回 `ErrNoChanges`；粘贴只有上下文行（无 `+` 行）的 diff 会得到 200 + 空报告，前端拿不到"没有可审查的变更"引导。
+
+**修法（已实施，M7-F8）**：① `review.Run` 在解析后统计所有文件新增行，0 新增行（纯上下文/纯删除 diff）同样返回 `ErrNoChanges`；② 新增 `ErrInvalidInput` 哨兵错误（diff 文件读取失败/仓库路径无效/文件列表读取失败时双重 `%w` 包装），API 层 `errors.Is` 三路映射：无变更 → 422、输入不可用 → 400、其余 → 500；③ CLI 原有 `errors.Is` 处理保持不变（"没有变更文件，退出。" exit 0）。测试：review 包 2 个新用例（`TestRun_ContextOnlyDiff_NoAddedLines` / `TestRun_InvalidInput`）+ server 包 Validation 扩展 2 场景（422/400）。实机冒烟：API 422/400/200 三态正确，前端错误条正常展示，CLI exit 0/1 语义正确。
+
+### 🟡 P2-11 /api/stats 聚合失真与 O(N) 解析（2026-09-28 实测）
+
+`server.go:305` `handleStats` 取 `ListTasks(200)` 后逐条 `GetReport` + `json.Unmarshal` 全量报告 JSON：① `total_tasks` 字段实际是"最近 200 条"，超 200 任务后失真；② 每次看板刷新做 200 次报告反序列化，浪费且随任务数线性变慢。修法（M7-F5）：风险分冗余进 `cr_review_tasks` 表，stats 走 SQL 聚合（顺便落 E3 趋势统计）。
+
+### 🟢 P3-12 服务化小项（2026-09-28 实测记录；✅ 前 3 项已修，M7-F8）
+
+- ~~不存在的 `repo_path` 返回 500（`chdir ... no such file`），语义上应是 400/422 + 用户可读提示~~ ✅ 已修（M7-F8）：`ErrInvalidInput` 哨兵 + `errors.Is` 映射 400。
+- ~~`server.Version = "1.0.0"` 是硬编码常量，发布流程升级版本要改两处（含 health 展示），应改 `-ldflags` 注入或统一读一处~~ ✅ 核查澄清（M7-F8）：全仓仅 `server/server.go` 一处版本常量（health 与 MCP serverInfo 均读它），已是单一来源；skill_test 的 1.0.0 是 SKILL.md 自身版本。后续若引入 release 流程再改 ldflags 注入。
+- ~~前端管线文案曾写"6 条内置规则"~~ ✅ 已于 2026-09-28 修正 app.js 与本文档 §3.3。
+- `handleCreateReview` 无请求体大小上限（无 `http.MaxBytesReader`）、无每请求超时——单机演示可接受，公网部署前必须加（M7-F2）。
+- 同步阻塞式 POST + `Server.mu` 全局互斥：一次容器沙箱审查（30s+）会阻塞所有其他用户的审查请求与浏览器 fetch ~~（M7-F1 异步任务模型根治）~~ ✅ 已根治（2026-09-28，M7-F1：202 + worker 队列 + 前端轮询，见 §2.4）。
+
+### 🟢 P3-13 任务行 completed_at/duration 为空（2026-09-28 视觉检查发现，遗留问题）
+
+`review.Run` Step 7 的 `CreateTask` 只写 status=completed，不填 `completed_at`/`duration`（`UpdateTaskStatus` 有填的逻辑但主流程没走它）——前端任务详情"结束"列显示 `—`。修法（M7 顺手）：CreateTask 后补 `UpdateTaskStatus(completed)` 或 INSERT 带上完成时间。异步队列失败行（`CreateFailedTask`）已正确填充，可作为参照。
+
 ---
 
 ## 七、成熟度目标与演进路线图
@@ -392,17 +422,17 @@ rules:
 
 "未来可用"不是感觉，是这张表的最后一列。所有指标都用 `dataset/` 数据集或可执行检查度量，不做主观判断。
 
-| 维度 | 当前基线（2026-09-25，M0 完成后） | v1.0 目标 |
+| 维度 | 当前基线（2026-09-28，v1.0 全量测试后） | 下一目标 |
 |------|----------------------|-----------|
-| 规则检出率（数据集） | 100%（20 样本，偏易） | ≥ 85%（≥ 60 样本，含 hard 层） |
-| 精确率（误报率） | 100% / 0% | ≥ 90% / ≤ 10% |
-| 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（M0-A1） | 0 泄漏，脱敏测试为硬门禁 |
-| 框架接入 | **M1+M3 已完成（6 处真接入）**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
-| LLM 能力 | **M4 已完成**：`--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | 真模型 precision 对照（待有 key 环境） |
-| 服务形态 | **CLI + Web 控制台 + MCP stdio（v1.0.0 全落地）** | v1.1：前端深化（React 重构 / 趋势看板 / 规则编辑器） |
-| CI / 自举 | **已落地并在 GitHub Actions 实跑全绿**：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查（首轮即修复 2 个真 bug） | 维持门禁纪律 |
-| 提交规范 | hooks + CI 双层校验已落地（M0-A7） | Conventional Commits 强制，不合规不合入 |
-| 测试 | 10 包全绿 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
+| 规则检出率（数据集） | 100%（39 样本，含 hard + hard2 盲评层） | ≥ 85%（≥ 50 样本，含跨函数 hard 层） |
+| 精确率（误报率） | 100% / 0%（hard2 盲评曾抓出构造器误报并已修复） | ≥ 92% / ≤ 8% |
+| 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（含前端展开态 DOM 实测） | 维持 0 泄漏硬门禁 |
+| 框架接入 | **6 处真接入**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
+| LLM 能力 | `--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | C3 修复建议生成 + 真模型 precision 对照 |
+| 服务形态 | CLI + Web 控制台 + MCP stdio；**M7-F1 起异步化**：202 + worker 队列 + 前端轮询（并发提交实测 1ms 级响应，不再互相阻塞）；认证/限流/白名单待 M7-F2/F4 | **M7 上线级**：认证限流 + 白名单 + Docker 部署 |
+| CI / 自举 | GitHub Actions 实跑全绿：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查 | 维持门禁纪律 |
+| 提交规范 | hooks + CI 双层校验 | Conventional Commits 强制，不合规不合入 |
+| 测试 | 13 包全绿（-race）+ 39 样本数据集门禁 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
 
 ### 7.2 里程碑计划表（M0–M5）
 
@@ -529,7 +559,7 @@ rules:
 >
 > **✅ Part1 已完成（2026-09-25，进度调整后提前执行）**：E1-lite（`review.Run()` 管线抽取 + `server` 包 8 个端点）+ E2-lite（`server/web/` vanilla SPA 四视图，go:embed 内嵌单二进制）+ 一键启停脚本（`scripts/start.sh` / `stop.sh`）。测试：server 包 10 个 httptest 用例 + Playwright 浏览器全视图走查（含真实审查、脱敏展示、并发落库、同秒 task_id 不冲突）。
 > **🎨 设计定稿（2026-09-25，作者要求）**：亮色主题——白色为主色调、淡色面板点缀、靛蓝单主色；**移除装饰性文案与 ASCII 元素**，必要的说明收敛为「？」悬浮提示（纯 CSS hover 小方框，`server/web/style.css` 的 `.help` 组件）；等宽字体仅用于代码/ID/数值。Playwright 断言主题色（body `rgb(247,248,250)` / 侧栏纯白）、tooltip hover 显隐与全视图功能。
-> **Part2（v1.1 backlog）**：React 重构、趋势看板深化、YAML 规则在线编辑器、D6 独立 HTML 报告、认证。
+> **Part2（2026-09-28 起并入 M7/M8 与 backlog）**：趋势看板（→M7-F5）、D6 独立 HTML 报告（→M7-F6）、认证（→M7-F2）已排入 M7；React 重构、YAML 规则在线编辑器留在 backlog（现有 vanilla SPA 不阻塞上线）。
 
 | 任务 | 产出 |
 |------|------|
@@ -541,11 +571,56 @@ rules:
 
 **退出标准**：`go build` 出单二进制，运行后浏览器打开 `http://localhost:8080` 能看历史任务与报告详情、能上传 diff 触发审查并看到结构化结果；HTML 报告离线可读；全量测试与数据集门禁不回退。
 
-机动缓冲：2027-01-16 → 01-31（顺延或做 backlog：C4/C5 Agent/Graph 编排、C7 PR 机器人、C9 记忆降噪、D3 go/types、D8 PatchView 语义层重构）。
+> **📋 2026-09-28 v1.0 后全量测试与 v2-hard2 盲评记录（本节由该次测试产出，详见 §六 P2-9~P3-12）**
+>
+> - **后端**：build / vet / gofmt 干净；13 包 `go test -race` 全绿；数据集门禁 39 样本 recall/precision/negFPR = **100%/100%/0%**，脱敏 0 泄漏；LLM 对照（fake 全确认）与基线一致。
+> - **数据集扩容**：新增 `hard2` 批次 9 样本（5 正 + 4 负陷阱，标注先于实现）：双文件混合变更、panic 处理业务错误、DSN 内嵌口令 + `_` 丢错双命中、具名函数 goroutine、库代码 log.Fatal；陷阱覆盖 defer 配对、os.ReadFile 自关闭 + %w 包装、errgroup 管理、占位符 URL。**盲评首跑即抓出 RES-AST-001 构造器所有权转移误报（P2-9），当场修复**（`ownershipTransferredByReturn` + 2 单测 + `hard_alias_import_001` 函数体同步），修后门禁满分。
+> - **前端/API 实测**（Playwright 浏览器 + curl 全端点）：五个视图全部可用、零 console 错误；示例一键载入、diff 提交、severity 筛选、任务档案、报告下载均正常；XSS 注入被转义（无 dialog/无可执行节点）；**展开态 DOM 全文无明文密钥**（脱敏链路端到端有效）；并发 3 审查经互斥串行全部 200；repo+sandbox 模式沙箱真实执行（go vet=0 / go test=0 / staticcheck=127 未装优雅记录）。
+> - **记录在案未修**：P2-10（纯上下文 diff 得 200 空报告）、P2-11（stats 上限 200 失真 + O(N) 解析）、P3-12（500 语义 / Version 硬编码 / 无请求体上限与超时）——均归入 M7。
+
+#### M7 · 上线可用（v1.1，2026-10-01 → 10-21，约 26h）▶ 下一阶段主战场
+
+> 用户目标：**把前端真正上线给更多人用**。当前架构是"单机演示级"：同步 POST（沙箱审查 30s+ 会阻塞所有用户）、全局互斥串行、无认证/限流/请求上限、repo_path 接受任意主机路径。M7 的每一项都直接对应这些实测暴露的约束（§六 P3-12），完成即具备小团队自部署条件。M6 遗留的 React 重构/规则在线编辑器继续留在 backlog，不影响上线。
+
+| 任务 | 产出 |
+|------|------|
+| F1 异步任务模型 | `POST /api/reviews` → `202 + task_id` 即返回；后台 worker 队列（并发数可配，替代全局互斥）；任务状态机 running/succeeded/failed + 超时回收；前端轮询进度与结果 | ✅ 2026-09-28 |
+| F2 认证与请求边界 | `--auth-token` 管理员认证（写操作需要，浏览可配置公开/只读）；IP 令牌桶限流；`http.MaxBytesReader`（10MB）+ 单请求 context 超时 |
+| F3 输入升级（降上手门槛） | 上传 zip / 多文件；粘贴整个文件按"新增行"审查（`--files` 语义 API 化）；GitHub PR URL 拉取（`GITHUB_TOKEN` 可选）——非命令行用户三种零门槛入口 |
+| F4 仓库路径白名单 | `--allow-repo` 前缀白名单 + 路径规范校验，封掉"任意主机路径"暴露面（P3-12）；上传模式作为无白名单时的替代入口 |
+| F5 趋势看板（E3 + 修 P2-11） | 风险分冗余进 `cr_review_tasks`，stats 改 SQL 聚合（按天任务数/评分分布/规则 TopN），前端趋势视图 |
+| F6 HTML 单文件报告（D6） | 审查多输出自包含 HTML（severity 筛选/六维图/可折叠），任务详情可直接下载转发 |
+| F7 部署形态（E5） | Docker compose（服务 + 数据卷）一条命令起；反代 TLS 说明；备份/升级文档"5 分钟自部署" |
+| F8 顺手修（P2-10/P3-12 部分） | 0 新增行 diff → 422 友好提示；repo_path 不存在 → 400；`errors.Is`；Version 核查 | ✅ 2026-09-28 |
+
+**退出标准**：两个用户同时提交审查不互相阻塞（异步队列 + 各自进度）；无 token 无法写操作；公网暴露面仅剩上传/白名单仓库；`docker compose up` 后 5 分钟内新用户完成首次审查；全量测试与数据集门禁不回退。
+
+> **📋 M7 执行进度记录（2026-09-28 起执行，每完成一项在此登记）**
+>
+> - ✅ **F8 完成（2026-09-28，首个任务，先行小步验证节奏）**：① `review.ErrInvalidInput` 新哨兵（输入读取失败双重 `%w` 包装），`review.Run` 对 0 新增行 diff（纯上下文/纯删除）返回 `ErrNoChanges`（修 P2-10）；② server 错误三路映射 `errors.Is`：422（无变更，文案"没有任何新增行"）/ 400（输入不可用）/ 500（其余），MCP/CLI 原有处理不变。测试：review 包 +2（`TestRun_ContextOnlyDiff_NoAddedLines`、`TestRun_InvalidInput`）、server Validation +2 场景；全量 13 包 `-race` 全绿、数据集门禁不回退；实机冒烟（API 三态 / 前端错误条 / CLI exit 0|1）全部通过。Version 核查结论：已是单一来源（见 P3-12）。
+> - ✅ **F1 异步任务模型完成（2026-09-28，M7 核心）**：**契约变更**——`POST /api/reviews` 由同步返回报告改为 `202 + {task_id, status:"queued"}`，前端轮询 `GET /api/tasks/{id}` 渲染进度与结果（MCP/CLI 不变仍同步）。实现：`server/queue.go`（worker 池 + 内存注册表 + 看门狗 + runFn 注入 + panic 兜底）；`review.Options.TaskID` 透传预分配 ID（`review.NewTaskID()` 导出）；`storage.CreateFailedTask` 补记失败行；`GET /api/tasks/{id}` 兼容 queued/running（report null）与 failed（error_msg）；入队前同步预检保持 F8 语义（diff 解析+新增行检查→422、repo stat→400），执行期错误落任务状态。配置：serve 新增 `--queue-workers`（默认 1：SQLite 单写最稳，HTTP 已不互相阻塞）、`--task-timeout`（默认 10m）。测试：server 4 个新用例（执行中态可见 / 失败落库 / 超时看门狗 / 提交不被慢任务阻塞，注入 fake runner 确定性验证）+ 全部旧用例迁移到 202 契约；review +2（TaskID 透传 / ID 唯一性）、storage +1（CreateFailedTask）；全量 13 包 `-race` 全绿、数据集门禁不回退。实机验证：并发 3 提交各 **1ms** 拿 202（原同步模式互相阻塞）、repo+沙箱任务执行期间详情返回 running+report null、预检 422/400 保持。**浏览器全流程 + 视觉模型验收发现并修复 3 个前端问题**：① `reviewSource` 全局状态在视图重渲染后残留（切到仓库标签→离开→回来→提交读空输入框直接 return）——viewReview 渲染时重置；② 轮询进度条复用红色 `.notice` 错误样式易误读——新增 `.notice.progress` 中性靛蓝样式（视觉模型确认 #EEF1FE/#4F6BED）；③ 我自己引入的模板字面量多余 `}` 语法错误致整页白屏——`node --check` 抓到，**顺手把 `node --check server/web/app.js` 加进 CI**（此类错误 Go 工具链测不到）。
+> - ⏭ 下一步：F2 认证与请求边界（token / 限流 / MaxBytesReader / 单请求超时）。
+
+#### M8 · 智能化增强（v1.2，2026-10-22 → 11-11，约 24h）
+
+> 用户目标：**更强智能化、自动检测、少动手**。三条线：LLM 深度介入（建议生成）、语义层升级（从"词法猜"到"类型知道"）、个性化降噪（记住人的判断）。
+
+| 任务 | 产出 |
+|------|------|
+| C3 LLM 修复建议 | 每条 finding 生成补丁式修复建议（llmreview 批量协议扩展），`--fake-model` 可复现、默认关闭 |
+| C9 记忆降噪 | 前端"标记误报"落库（规则 × 文件模式），同模式再报自动降置信度入 warnings；后续升级 `memory/sqlitevec` |
+| D3 go/types 类型增强 | repo 模式加载类型信息：句柄是否 `io.Closer`、函数真实返回签名——RES/ERR 规则从"猜"变"知道" |
+| D7 增量审查 | 同 repo 只审上次之后的新变更，任务详情给出"新增/复发/已消失"对比视图 |
+| W1 全语言兜底检测 | 非 Go 文件的密钥/敏感信息/大文件删除等通用规则降级路径（自动探测语言，Go 之外不静默跳过） |
+| W2 GOR/RES 跨函数分析 | 函数级 open/close 与 goroutine 退出配对（当前 hunk/文件级），收敛保守上报 |
+
+**退出标准**：数据集 v2 ≥ 50 样本（含跨函数 hard 批次，标注先于实现），recall ≥ 85% 且 precision ≥ 92%；误报标记 → 降置信度闭环可演示；LLM 建议在 fake 模式下可复现；全量门禁不回退。
+
+机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
 ### 7.3 扩展任务明细（A/B/C/D 层完整任务库）
 
-> 7.2 只列每期重点；这里是完整任务库。排期映射：**M0** = A1–A7 + D1（基础 CI + 提交校验）；**M1** = B1/B2/B5/B6；**M2** = D4/D5 + 数据集 hard 层 + evidence_chain；**M3** = B3/B4/D2；**M4** = C1/C2/C8；**M5** = C6 + D1（自举）；**M6** = D6 + E1–E5；其余为 backlog。工作量：S=小时级，M=天级，L=周级。
+> 7.2 只列每期重点；这里是完整任务库。排期映射：**M0** = A1–A7 + D1（基础 CI + 提交校验）；**M1** = B1/B2/B5/B6；**M2** = D4/D5 + 数据集 hard 层 + evidence_chain；**M3** = B3/B4/D2；**M4** = C1/C2/C8；**M5** = C6 + D1（自举）；**M6** = D6 + E1–E5；**M7** = F1–F8；**M8** = C3/C9/D3/D7/W1/W2；其余为 backlog。工作量：S=小时级，M=天级，L=周级。
 
 #### A 层：修复与加固（先做，全是小改动）
 
@@ -606,9 +681,31 @@ rules:
 |---|--------|------|--------|
 | E1 | REST API 服务 ✅ lite 已落地 | 把 main.go 的 8 步流程抽成 `review.Run(opts)`；8 个端点见 §2.4；复用 `storage.Store`（接口已抽象，SQLite 起步，可换 Postgres） | M |
 | E2 | Web 前端 SPA ✅ lite 已落地（vanilla + go:embed 单二进制） | v1.1 升级为 React/Vite：任务列表 / 报告详情 / 趋势看板 / 规则编辑 | L |
-| E3 | 趋势统计 API | 按天聚合任务数、评分分布、规则命中 TopN | S |
+| E3 | 趋势统计 API → M7-F5 | 按天聚合任务数、评分分布、规则命中 TopN（SQL 聚合，顺带修 P2-11） | S |
 | E4 | 规则管理 API | 规则列表 / YAML 校验 / 单 diff 试跑 | M |
-| E5 | 部署形态 | 单二进制内嵌前端（✅ 已实现）；可选 Docker compose（Agent+UI / Postgres） | S |
+| E5 | 部署形态 → M7-F7 | 单二进制内嵌前端（✅ 已实现）；Docker compose（服务 + 数据卷）+ TLS 反代与备份文档 | S |
+
+#### F 层：上线运营（M7 主战场，2026-09-28 规划）
+
+> 上线三问：多用户互不阻塞吗（F1）、暴露面可控吗（F2/F4）、不会用命令行的人能用吗（F3）。
+
+| # | 扩展项 | 说明 | 工作量 |
+|---|--------|------|--------|
+| F1 | 异步任务模型 | `202 + task_id` 即返回；worker 队列（并发可配）+ 任务状态机 + 超时回收；前端轮询进度；替代全局互斥（P3-12 根治） | M |
+| F2 | 认证与请求边界 | `--auth-token` 写操作认证、浏览可公开只读；IP 令牌桶限流；`MaxBytesReader` 10MB；单请求 context 超时 | M |
+| F3 | 零门槛输入 | zip/多文件上传、粘贴整文件（按新增行审查）、GitHub PR URL 拉取（GITHUB_TOKEN 可选） | M |
+| F4 | 仓库路径白名单 | `--allow-repo` 前缀白名单 + 路径规范校验（封掉任意主机路径） | S |
+| F5 | 趋势看板 | 风险分冗余进任务表 + SQL 按天聚合 + 前端趋势视图（E3 落地，修 P2-11） | S |
+| F6 | HTML 单文件报告 | D6 落地：自包含、severity 筛选、六维图，可离线转发 | M |
+| F7 | Docker compose 部署 | 一条命令自部署 + TLS 反代说明 + 备份/升级文档 | S |
+| F8 | 服务语义修复 | P2-10（0 新增行 → 422 友好提示）/ P3-12（repo 不存在 → 400、`errors.Is`、Version 统一注入） | S |
+
+#### W 层：智能化（M8 主战场，2026-09-28 规划）
+
+| # | 扩展项 | 说明 | 工作量 |
+|---|--------|------|--------|
+| W1 | 全语言兜底检测 | 非 Go 文件自动走密钥/敏感信息/大删除等通用规则（语言自动探测，Go 之外不静默跳过） | M |
+| W2 | GOR/RES 跨函数分析 | 函数级 open/close 与 goroutine 退出配对分析（当前 hunk/文件级），收敛保守上报 | L |
 
 > 选型说明：框架的 `server/agui` 面向"对话式 Agent"UI，本项目 LLM 不在主链路，人用界面走 REST + SPA 更合适；MCP（C6，M5）负责"Agent 客户端调用"这一形态。两条线互补不冲突。
 
@@ -617,20 +714,21 @@ rules:
 | 版本 | 时间点 | 规模 | 内容 | 对应质量门禁 |
 |------|--------|------|------|-------------|
 | v0（已完成） | 2026-09-23 | 20 | easy/medium 正样本 + trap 陷阱负样本 + 脱敏样本 | recall ≥ 80%，precision ≥ 85%，negFPR ≤ 15%，脱敏 SKIP→PASS |
-| v1 | ✅ M2（2026-09-27，30 样本，向 ~50 继续演进） | 30 | +hard 层 10 样本（间接密钥/struct tag/跨 hunk/生成文件/别名导入/DB 生命周期正负）、evidence_chain 脱敏断言 | recall 100% / precision 100% / negFPR 0% / 脱敏 0 泄漏（门禁 85/90/10） |
-| v2 | M4 | ~60 | +LLM 复核对照样本（误报样本预期被 LLM 降置信度） | 同 v1 + LLM 开启后 precision ≥ 95% |
+| v1 | ✅ M2（2026-09-27，30 样本） | 30 | +hard 层 10 样本（间接密钥/struct tag/跨 hunk/生成文件/别名导入/DB 生命周期正负）、evidence_chain 脱敏断言 | recall 100% / precision 100% / negFPR 0% / 脱敏 0 泄漏（门禁 85/90/10） |
+| v1.5 | ✅ 2026-09-28（39 样本） | 39 | +hard2 批次 9 样本（**标注先于实现盲评**）：双文件混合/panic 业务路径/DSN+丢错双命中/具名 goroutine/库 log.Fatal；陷阱：defer 配对/os.ReadFile 自关闭+wrap/errgroup/占位符 URL。**首跑抓出 RES-AST-001 构造器误报（P2-9）并修复** | 同 v1 门禁，39 样本 100%/100%/0% |
+| v2 | M8 | ≥ 50 | +跨函数 hard 批次（配对跨函数体/句柄存结构体字段）、LLM 修复建议质量样本 | recall ≥ 85%，precision ≥ 92%，LLM 建议样本合格率 ≥ 80% |
 
 **标注纪律**：hard 样本先手写标注再跑引擎（防止"照抄实现"导致数据集失去检验能力）；每个里程碑结束后抽查标注与实现的独立性。
 
 ### 7.5 指标看板（每个里程碑结束时更新此表）
 
-| 指标 | 基线 09-23 | M0 门禁 | M2 门禁 | v1.0 门禁 | 当前实际（09-25） |
+| 指标 | 基线 09-23 | M0 门禁 | M2 门禁 | v1.0 门禁 | 当前实际（09-28） |
 |------|-----------|---------|---------|-----------|---------|
-| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **30**（v1 首批 hard 层已入） |
-| 检出率 recall | 100% | ≥ 80% | ≥ 85% | ≥ 85% | **100%**（v1 门禁 85%） |
-| 精确率 precision | 100% | ≥ 85% | ≥ 90% | ≥ 90% | **100%**（v1 门禁 90%） |
-| 负样本误报率 | 0% | ≤ 15% | ≤ 10% | ≤ 10% | **0%**（13 负样本含 5 个 hard 陷阱） |
-| 脱敏泄漏 | 2（P0-1） | 0（硬门禁） | 0 | 0 | **0**（M0-A1，硬门禁 PASS） |
+| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **39**（v1 hard 10 + v1.5 hard2 盲评 9 已入） |
+| 检出率 recall | 100% | ≥ 80% | ≥ 85% | ≥ 85% | **100%**（门禁 85%） |
+| 精确率 precision | 100% | ≥ 85% | ≥ 90% | ≥ 90% | **100%**（门禁 90%；hard2 盲评首跑 97%，修复 P2-9 后恢复） |
+| 负样本误报率 | 0% | ≤ 15% | ≤ 10% | ≤ 10% | **0%**（17 负样本含 9 个 hard/hard2 陷阱） |
+| 脱敏泄漏 | 2（P0-1） | 0（硬门禁） | 0 | 0 | **0**（硬门禁 PASS；前端展开态 DOM 实测亦 0） |
 | 红色项 | 脱敏 | — | — | — | **无** |
 
 更新方法：跑 `go test -run TestDataset -v .`，把"数据集质量报告"数字填入"当前实际"列。
