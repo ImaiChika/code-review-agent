@@ -120,8 +120,15 @@ type Options struct {
 	LLMFakeResponses []string // fake 模式的预设判定响应（按序回放；空 = 默认全 CONFIRM；测试/脚本用）
 	AuditFile        string   // 审计日志路径；空 = 默认 tool_safety_audit.jsonl 落 OutputDir
 	SkillsDir        string   // CR Skill 目录（M1-B1；空 = 自动探测 ./skills，找不到则报告不含 skill 元数据）
+	TaskID           string   // 预分配的任务 ID（M7-F1 异步队列用；空 = 自动生成）
 	DryRun           bool     // 不写数据库、不执行沙箱
 	Verbose          bool     // 过程日志打到 stdout
+}
+
+// NewTaskID 生成任务 ID：秒级时间戳 + 随机后缀。
+// 服务模式下同一秒可能有多个请求，随机后缀防止撞 cr_review_tasks 唯一约束。
+func NewTaskID() string {
+	return fmt.Sprintf("task-%s-%s", time.Now().Format("20060102-150405"), randHex(3))
 }
 
 // Run 执行一次完整审查，返回最终报告。
@@ -142,8 +149,11 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	}
 
 	start := time.Now()
-	// 秒级时间戳 + 随机后缀：服务模式下同一秒可能有多个请求，防止 task_id 撞唯一约束
-	taskID := fmt.Sprintf("task-%s-%s", start.Format("20060102-150405"), randHex(3))
+	// M7-F1：异步模式下任务 ID 由队列预分配（202 响应要用），透传进来
+	taskID := opts.TaskID
+	if taskID == "" {
+		taskID = NewTaskID()
+	}
 	ctx := context.Background()
 	counters := &reviewCounters{}
 

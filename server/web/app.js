@@ -215,6 +215,9 @@ let reviewSource = "diff";
 let samplesCache = null;
 
 async function viewReview() {
+  // 视图每次渲染 DOM 都重置为 diff 标签，全局状态必须跟着重置，
+  // 否则从 repo 标签离开再回来，提交仍会读空的仓库输入框
+  reviewSource = "diff";
   if (!samplesCache) {
     try { samplesCache = (await api("/api/samples")).samples || []; }
     catch { samplesCache = []; }
@@ -288,18 +291,17 @@ async function submitReview() {
 
   btn.disabled = true;
   btn.innerHTML = `<span class="spin"></span> 审查中 …`;
-  log("审查管线执行中 …");
+  log("已提交，等待审查队列 …");
   const t0 = performance.now();
 
   try {
-    const rep = await api("/api/reviews", {
+    // M7-F1：202 + task_id，结果轮询任务档案
+    const res = await api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const ms = (performance.now() - t0).toFixed(0);
-    renderReviewResult(rep);
-    log(`审查完成 ${rep.task_id} — 风险 ${rep.monitor.risk_score.toFixed(0)}/100 (${rep.monitor.risk_grade}) · 耗时 ${ms}ms`);
+    await pollAndRender(res.task_id, t0);
   } catch (e) {
     document.getElementById("review-result").innerHTML =
       `<div class="notice">✗ ${esc(e.message)}</div>`;
@@ -307,6 +309,56 @@ async function submitReview() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = "执行审查";
+  }
+}
+
+/* 轮询任务档案直到 completed/failed（M7-F1 异步队列） */
+const POLL_INTERVAL = 700;
+const POLL_DEADLINE_MS = 15 * 60 * 1000; // 前端兜底上限，超时提示（服务端另有看门狗）
+const STATUS_LABEL = { queued: "排队中", running: "审查中", completed: "完成", failed: "失败" };
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function pollAndRender(taskID, t0) {
+  const box = document.getElementById("review-result");
+  const deadline = Date.now() + POLL_DEADLINE_MS;
+  let lastStatus = "";
+
+  for (;;) {
+    let d = null;
+    try { d = await api(`/api/tasks/${encodeURIComponent(taskID)}`); }
+    catch { /* 瞬态失败（如刚入队的可见性窗口）忽略，下一轮重试 */ }
+
+    const st = d && d.task ? d.task.status : lastStatus;
+    lastStatus = st;
+
+    if (st === "completed" && d && d.report) {
+      const ms = (performance.now() - t0).toFixed(0);
+      renderReviewResult(d.report);
+      log(`审查完成 ${taskID} — 风险 ${d.report.monitor.risk_score.toFixed(0)}/100 (${d.report.monitor.risk_grade}) · 耗时 ${ms}ms`);
+      return;
+    }
+    if (st === "failed") {
+      const msg = (d && d.task && d.task.error_msg) || "审查执行失败";
+      box.innerHTML = `<div class="notice">✗ 任务 ${esc(taskID)} 失败：${esc(msg)}</div>`;
+      log(`审查失败 — ${esc(msg)}`);
+      return;
+    }
+
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    box.innerHTML = `
+      <div class="notice progress" style="display:flex;align-items:center;gap:10px">
+        <span class="spin"></span>
+        <span>${STATUS_LABEL[st] || st} … ${esc(taskID)} · 已等待 ${elapsed}s</span>
+      </div>`;
+    log(`${STATUS_LABEL[st] || st} — ${taskID}`);
+
+    if (Date.now() > deadline) {
+      box.innerHTML = `<div class="notice">✗ 等待超时（${POLL_DEADLINE_MS / 60000} 分钟），任务 ${esc(taskID)} 仍在执行，可稍后在任务记录中查看结果</div>`;
+      log("等待超时，停止轮询");
+      return;
+    }
+    await sleep(POLL_INTERVAL);
   }
 }
 
@@ -407,6 +459,25 @@ let taskSevFilter = "all";
 async function viewTask(taskID) {
   log(`加载任务 ${taskID} …`);
   const d = await api(`/api/tasks/${encodeURIComponent(taskID)}`);
+
+  // M7-F1：进行中/失败任务没有报告，展示状态卡
+  if (!d.report) {
+    const st = d.task ? d.task.status : "unknown";
+    $view.innerHTML = `
+    <div class="view-enter">
+      <h2 class="view-title">任务档案</h2>
+      <div class="kv" style="margin-bottom:16px">
+        <span class="k">任务</span><span class="v mono">${esc(taskID)} · ${esc((d.task && d.task.input_type) || "")}</span>
+      </div>
+      ${st === "failed"
+        ? `<div class="notice">✗ 任务失败：${esc((d.task && d.task.error_msg) || "未知原因")}</div>`
+        : `<div class="notice progress" style="display:flex;align-items:center;gap:10px"><span class="spin"></span>
+           <span>${STATUS_LABEL[st] || st} … 尚无报告，稍后刷新</span></div>`}
+    </div>`;
+    log(`${STATUS_LABEL[st] || st} — ${taskID}（无报告）`);
+    return;
+  }
+
   const rep = d.report;
   // Go 的空切片会序列化为 null，统一兜底为数组
   rep.findings = rep.findings || [];

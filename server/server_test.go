@@ -14,6 +14,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"code-review-agent/report"
+	"code-review-agent/review"
 )
 
 // newTestServer 启动一个完整的测试服务（真实 SQLite + 内嵌前端 + 真实审查管线）。
@@ -102,6 +106,7 @@ func TestFrontendAssets(t *testing.T) {
 }
 
 // submitReview 提交一次审查并返回报告 JSON。
+// submitReview 提交审查（M7-F1 起为异步：202 + task_id）。
 func submitReview(t *testing.T, ts *httptest.Server, body string) map[string]any {
 	t.Helper()
 	res, err := http.Post(ts.URL+"/api/reviews", "application/json", strings.NewReader(body))
@@ -113,23 +118,74 @@ func submitReview(t *testing.T, ts *httptest.Server, body string) map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if res.StatusCode != 200 {
-		t.Fatalf("status = %d, body = %v", res.StatusCode, out)
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, 期望 202, body = %v", res.StatusCode, out)
+	}
+	if out["task_id"] == nil || out["task_id"] == "" {
+		t.Fatalf("202 响应缺少 task_id: %v", out)
 	}
 	return out
+}
+
+// getTaskDetail 拉取任务详情，返回 {task, report, ...}；report 可能为 null（进行中/失败）。
+func getTaskDetail(t *testing.T, ts *httptest.Server, taskID string) (map[string]any, int) {
+	t.Helper()
+	res, err := http.Get(ts.URL + "/api/tasks/" + taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("解析任务详情失败: %v", err)
+	}
+	return out, res.StatusCode
+}
+
+// waitTaskDone 轮询直到任务进入终态（completed/failed），返回详情。
+// 注：真实管线先落库后置 completed，因此 completed 时报告必已可查；
+// 注入 fake runner 的用例没有报告，completed + report null 同样是合法终态。
+func waitTaskDone(t *testing.T, ts *httptest.Server, taskID string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		d, code := getTaskDetail(t, ts, taskID)
+		if code == http.StatusOK {
+			task, _ := d["task"].(map[string]any)
+			if task != nil {
+				switch task["status"] {
+				case "completed", "failed":
+					return d
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("任务 %s 30s 内未完成: %v", taskID, d)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestCreateReview_FromDiffContent(t *testing.T) {
 	ts := newTestServer(t)
 
 	reqBody, _ := json.Marshal(map[string]any{"diff_content": sampleSecretDiff})
-	rep := submitReview(t, ts, string(reqBody))
+	sub := submitReview(t, ts, string(reqBody))
+	taskID := sub["task_id"].(string)
 
-	if rep["task_id"] == nil || rep["task_id"] == "" {
-		t.Error("task_id 不应为空")
+	// 轮询到终态后取报告
+	d := waitTaskDone(t, ts, taskID)
+	task, _ := d["task"].(map[string]any)
+	if task["input_type"] != "diff_content" {
+		t.Errorf("input_type = %v", task["input_type"])
 	}
-	if rep["input_type"] != "diff_content" {
-		t.Errorf("input_type = %v", rep["input_type"])
+	if task["status"] != "completed" {
+		t.Fatalf("status = %v, 期望 completed（errMsg=%v）", task["status"], task["error_msg"])
+	}
+
+	rep, _ := d["report"].(map[string]any)
+	if rep == nil {
+		t.Fatal("completed 任务应有报告")
 	}
 
 	// findings 应包含 SEC-AST-001，且 evidence 无明文密钥
@@ -208,6 +264,19 @@ func TestTaskLifecycle(t *testing.T) {
 	rep := submitReview(t, ts, string(reqBody))
 	taskID := rep["task_id"].(string)
 
+	// M7-F1：入队后任务立即出现在详情里（进行中态，无报告）
+	d0, code := getTaskDetail(t, ts, taskID)
+	if code != http.StatusOK {
+		t.Fatalf("刚入队任务详情 status = %d, 期望 200", code)
+	}
+	task0, _ := d0["task"].(map[string]any)
+	if st := task0["status"]; st != "queued" && st != "running" && st != "completed" {
+		t.Errorf("刚入队任务 status = %v（queued/running/completed 均可，取决于调度速度）", st)
+	}
+
+	// 等待完成后走完生命周期断言
+	waitTaskDone(t, ts, taskID)
+
 	// 任务列表包含该任务
 	res, _ := http.Get(ts.URL + "/api/tasks?limit=10")
 	var list map[string]any
@@ -219,14 +288,8 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 
 	// 详情
-	res, _ = http.Get(ts.URL + "/api/tasks/" + taskID)
-	if res.StatusCode != 200 {
-		t.Fatalf("详情 status = %d", res.StatusCode)
-	}
-	var detail map[string]any
-	json.NewDecoder(res.Body).Decode(&detail)
-	res.Body.Close()
-	if detail["task"] == nil || detail["report"] == nil {
+	d, _ := getTaskDetail(t, ts, taskID)
+	if d["task"] == nil || d["report"] == nil {
 		t.Error("详情应包含 task 与 report")
 	}
 
@@ -253,8 +316,10 @@ func TestStats(t *testing.T) {
 	ts := newTestServer(t)
 
 	reqBody, _ := json.Marshal(map[string]any{"diff_content": sampleSecretDiff})
-	submitReview(t, ts, string(reqBody))
-	submitReview(t, ts, string(reqBody)) // 跑两次，验证聚合
+	r1 := submitReview(t, ts, string(reqBody))
+	r2 := submitReview(t, ts, string(reqBody)) // 跑两次，验证聚合
+	waitTaskDone(t, ts, r1["task_id"].(string))
+	waitTaskDone(t, ts, r2["task_id"].(string))
 
 	res, _ := http.Get(ts.URL + "/api/stats")
 	var stats map[string]any
@@ -320,8 +385,12 @@ func TestSamples(t *testing.T) {
 func TestConcurrency_SerializedReviews(t *testing.T) {
 	ts := newTestServer(t)
 
-	// 并发提交 3 个审查，验证互斥锁下全部成功落库
-	errCh := make(chan error, 3)
+	// M7-F1：并发提交 3 个审查，全部应立即 202（不被彼此阻塞），且最终全部成功落库
+	type subResult struct {
+		id  string
+		err error
+	}
+	subCh := make(chan subResult, 3)
 	for i := 0; i < 3; i++ {
 		go func(i int) {
 			body := fmt.Sprintf(`{"diff_content":%q}`,
@@ -329,20 +398,189 @@ func TestConcurrency_SerializedReviews(t *testing.T) {
 			res, err := http.Post(ts.URL+"/api/reviews", "application/json",
 				strings.NewReader(body))
 			if err != nil {
-				errCh <- err
+				subCh <- subResult{err: err}
 				return
 			}
-			if res.StatusCode != 200 {
-				errCh <- fmt.Errorf("并发审查 #%d status = %d", i, res.StatusCode)
-				return
-			}
+			var out map[string]any
+			json.NewDecoder(res.Body).Decode(&out)
 			res.Body.Close()
-			errCh <- nil
+			if res.StatusCode != http.StatusAccepted {
+				subCh <- subResult{err: fmt.Errorf("并发审查 #%d status = %d", i, res.StatusCode)}
+				return
+			}
+			subCh <- subResult{id: out["task_id"].(string)}
 		}(i)
 	}
+	ids := make([]string, 0, 3)
 	for i := 0; i < 3; i++ {
-		if err := <-errCh; err != nil {
-			t.Error(err)
+		r := <-subCh
+		if r.err != nil {
+			t.Error(r.err)
+			continue
+		}
+		ids = append(ids, r.id)
+	}
+	// 三个任务全部 completed 且可取到报告
+	for _, id := range ids {
+		d := waitTaskDone(t, ts, id)
+		task, _ := d["task"].(map[string]any)
+		if task["status"] != "completed" {
+			t.Errorf("任务 %s status = %v, 期望 completed", id, task["status"])
+		}
+		if d["report"] == nil {
+			t.Errorf("任务 %s 完成后应有报告", id)
 		}
 	}
+}
+
+// ========== M7-F1：异步队列状态机 ==========
+
+// newInjectedServer 启动一个注入 fake runFn 的测试服务（不跑真实审查管线）。
+func newInjectedServer(t *testing.T, workers int, timeout time.Duration,
+	runFn func(review.Options) (*report.ReviewReport, error)) (*Server, *httptest.Server) {
+	t.Helper()
+	tmp := t.TempDir()
+	s, err := New(Config{
+		Port:        0,
+		DBPath:      filepath.Join(tmp, "review.db"),
+		DataDir:     filepath.Join(tmp, "data"),
+		SampleDir:   "../testdata",
+		SandboxMode: "off",
+		Workers:     workers,
+		TaskTimeout: timeout,
+	})
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	s.queue.runFn = runFn
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = s.Close()
+	})
+	return s, ts
+}
+
+func fakeOK(opts review.Options) (*report.ReviewReport, error) {
+	return &report.ReviewReport{TaskID: opts.TaskID}, nil
+}
+
+func TestAsyncQueue_RunningStateVisible(t *testing.T) {
+	// 慢任务执行期间，详情应 200 返回 running 态且 report 为 null
+	release := make(chan struct{})
+	_, ts := newInjectedServer(t, 1, time.Minute, func(opts review.Options) (*report.ReviewReport, error) {
+		<-release
+		return fakeOK(opts)
+	})
+
+	sub := submitReview(t, ts, `{"diff_content":"--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,4 @@\n package x\n \n+var apiKey = \"sk-live-000000000000\"\n+var _ = 1\n"}`)
+	id := sub["task_id"].(string)
+
+	d, code := getTaskDetail(t, ts, id)
+	if code != http.StatusOK {
+		t.Fatalf("执行中任务详情 status = %d, 期望 200", code)
+	}
+	task, _ := d["task"].(map[string]any)
+	if task["status"] != "running" {
+		t.Errorf("执行中 status = %v, 期望 running", task["status"])
+	}
+	if d["report"] != nil {
+		t.Error("执行中任务 report 应为 null")
+	}
+
+	close(release)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		d, _ = getTaskDetail(t, ts, id)
+		task, _ = d["task"].(map[string]any)
+		if task["status"] == "completed" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("释放后任务未完成: %v", task)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestAsyncQueue_FailurePersisted(t *testing.T) {
+	// runFn 出错 → 任务 failed + 原因可见 + DB 补记失败行
+	s, ts := newInjectedServer(t, 1, time.Minute, func(review.Options) (*report.ReviewReport, error) {
+		return nil, fmt.Errorf("boom: 沙箱初始化失败")
+	})
+
+	sub := submitReview(t, ts, `{"diff_content":"--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,4 @@\n package x\n \n+var apiKey = \"sk-live-000000000000\"\n+var _ = 1\n"}`)
+	id := sub["task_id"].(string)
+
+	d := waitTaskDone(t, ts, id)
+	task, _ := d["task"].(map[string]any)
+	if task["status"] != "failed" {
+		t.Fatalf("status = %v, 期望 failed", task["status"])
+	}
+	if msg, _ := task["error_msg"].(string); msg == "" {
+		t.Error("失败原因 error_msg 不应为空")
+	} else if !strings.Contains(msg, "boom") {
+		t.Errorf("error_msg = %q, 应包含失败原因", msg)
+	}
+	if d["report"] != nil {
+		t.Error("失败任务 report 应为 null")
+	}
+
+	// DB 补记的失败行可查（历史可见）
+	dbTask, err := s.store.GetTask(id)
+	if err != nil {
+		t.Fatalf("失败任务应补记进 DB: %v", err)
+	}
+	if dbTask.Status != "failed" || dbTask.ErrorMsg == "" {
+		t.Errorf("DB 行 = %v (err=%q), 期望 failed 带原因", dbTask.Status, dbTask.ErrorMsg)
+	}
+}
+
+func TestAsyncQueue_TimeoutWatchdog(t *testing.T) {
+	// runFn 超过看门狗上限 → 任务标 failed 且提示超时
+	_, ts := newInjectedServer(t, 1, 150*time.Millisecond, func(opts review.Options) (*report.ReviewReport, error) {
+		time.Sleep(3 * time.Second)
+		return fakeOK(opts)
+	})
+
+	sub := submitReview(t, ts, `{"diff_content":"--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,4 @@\n package x\n \n+var apiKey = \"sk-live-000000000000\"\n+var _ = 1\n"}`)
+	id := sub["task_id"].(string)
+
+	d := waitTaskDone(t, ts, id)
+	task, _ := d["task"].(map[string]any)
+	if task["status"] != "failed" {
+		t.Fatalf("status = %v, 期望 failed（超时）", task["status"])
+	}
+	if msg, _ := task["error_msg"].(string); !strings.Contains(msg, "超时") {
+		t.Errorf("error_msg = %q, 应包含超时提示", msg)
+	}
+}
+
+func TestAsyncQueue_SubmitNotBlockedByRunningJob(t *testing.T) {
+	// 单 worker 下，第一个任务慢执行时，第二个提交必须立即 202（不再互相阻塞）
+	release := make(chan struct{})
+	_, ts := newInjectedServer(t, 1, time.Minute, func(opts review.Options) (*report.ReviewReport, error) {
+		<-release
+		return fakeOK(opts)
+	})
+
+	sub1 := submitReview(t, ts, `{"diff_content":"--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,4 @@\n package a\n \n+var apiKey = \"sk-live-000000000000\"\n+var _ = 1\n"}`)
+
+	// 第二个提交在第一个占用 worker 期间到达：必须快速拿到 202
+	start := time.Now()
+	sub2 := submitReview(t, ts, `{"diff_content":"--- a/b.go\n+++ b/b.go\n@@ -1,2 +1,4 @@\n package b\n \n+var apiKey = \"sk-live-000000000001\"\n+var _ = 1\n"}`)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("第二个提交被阻塞 %v（期望毫秒级 202）", elapsed)
+	}
+
+	// 第二个任务此时应处于 queued（worker 被第一个占着）
+	d, _ := getTaskDetail(t, ts, sub2["task_id"].(string))
+	task, _ := d["task"].(map[string]any)
+	if task["status"] != "queued" {
+		t.Logf("第二个任务 status = %v（单 worker 下预期 queued）", task["status"])
+	}
+
+	close(release)
+	waitTaskDone(t, ts, sub1["task_id"].(string))
+	waitTaskDone(t, ts, sub2["task_id"].(string))
 }

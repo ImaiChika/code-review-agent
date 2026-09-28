@@ -330,3 +330,37 @@ func TestGetTaskSummary(t *testing.T) {
 		t.Errorf("total = %v, 期望 3", summary["total"])
 	}
 }
+
+// TestCreateFailedTask M7-F1：异步队列失败的审查需补记失败行（含原因），
+// 保证失败历史可按 task_id 查询。
+func TestCreateFailedTask(t *testing.T) {
+	store := newTestStore(t)
+
+	task := &ReviewTask{
+		TaskID:    "task-failed-test-0001",
+		Status:    TaskStatusFailed, // CreateFailedTask 内部固定 failed，此处仅为语义完整
+		InputType: "diff_content",
+		InputPath: "api-upload",
+		StartedAt: time.Now().Add(-3 * time.Second),
+	}
+	if err := store.CreateFailedTask(task, "任务执行超时（上限 10m0s）"); err != nil {
+		t.Fatalf("CreateFailedTask 失败: %v", err)
+	}
+
+	got, err := store.GetTask("task-failed-test-0001")
+	if err != nil {
+		t.Fatalf("GetTask 失败: %v", err)
+	}
+	if got.Status != TaskStatusFailed {
+		t.Errorf("status = %v, 期望 failed", got.Status)
+	}
+	if got.ErrorMsg != "任务执行超时（上限 10m0s）" {
+		t.Errorf("error_msg = %q, 期望包含超时原因", got.ErrorMsg)
+	}
+	if got.CompletedAt == nil {
+		t.Error("completed_at 应被填充")
+	}
+	if got.Duration == "" {
+		t.Error("duration 应被填充")
+	}
+}

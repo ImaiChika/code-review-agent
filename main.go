@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"code-review-agent/review"
 	"code-review-agent/server"
@@ -160,6 +161,8 @@ func runServe(args []string) {
 	rulesDir := fs.String("rules-dir", "", "YAML 自定义规则目录")
 	sandboxMode := fs.String("sandbox", "off", "仓库审查的沙箱模式：off / container / local")
 	sampleDir := fs.String("sample-dir", "testdata", "示例 diff 目录（前端一键演示用，不存在则隐藏示例）")
+	workers := fs.Int("queue-workers", 1, "异步审查并发 worker 数（M7-F1；默认 1 串行，SQLite 单写最稳）")
+	taskTimeout := fs.Duration("task-timeout", 10*time.Minute, "单个审查任务的看门狗上限（超时标记 failed）")
 	fs.Parse(args)
 
 	srv, err := server.New(server.Config{
@@ -169,13 +172,16 @@ func runServe(args []string) {
 		RulesDir:    *rulesDir,
 		SandboxMode: *sandboxMode,
 		SampleDir:   *sampleDir,
+		Workers:     *workers,
+		TaskTimeout: *taskTimeout,
 	})
 	if err != nil {
 		log.Fatalf("初始化服务失败: %v", err)
 	}
 
 	fmt.Printf("🚀 Code Review Agent 服务已启动: http://localhost:%d\n", *port)
-	fmt.Printf("   数据库: %s | 产物目录: %s\n", *dbPath, *dataDir)
+	fmt.Printf("   数据库: %s | 产物目录: %s | 审查队列: %d worker, 单任务上限 %s\n",
+		*dbPath, *dataDir, *workers, *taskTimeout)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("HTTP 服务退出: %v", err)
 	}

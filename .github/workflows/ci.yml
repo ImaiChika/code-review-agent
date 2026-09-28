@@ -36,6 +36,9 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: 前端 JS 语法检查（node --check）
+        run: node --check server/web/app.js
+
       - name: 全量测试（-race，含数据集质量门禁）
         run: go test ./... -count=1 -race -timeout 10m -v
 

@@ -340,3 +340,33 @@ func TestRun_FakeModelDeterministic(t *testing.T) {
 		t.Error("LLM 复核计数不一致")
 	}
 }
+
+// TestRun_PresetTaskID M7-F1：异步队列预分配的任务 ID 应透传到报告与落库主键。
+func TestRun_PresetTaskID(t *testing.T) {
+	outDir := t.TempDir()
+	rep, err := Run(Options{
+		DiffContent: "--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,4 @@\n package x\n \n+var apiKey = \"sk-live-zz99xx88ww77\"\n+var _ = 1\n",
+		TaskID:      "task-preset-id-0001",
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	if rep.TaskID != "task-preset-id-0001" {
+		t.Errorf("TaskID = %q, 期望透传预分配 ID", rep.TaskID)
+	}
+}
+
+// TestNewTaskID_Unique M7-F1：同秒内多次生成不冲突（202 响应依赖此唯一性）。
+func TestNewTaskID_Unique(t *testing.T) {
+	seen := make(map[string]bool, 100)
+	for i := 0; i < 100; i++ {
+		id := NewTaskID()
+		if seen[id] {
+			t.Fatalf("task ID 冲突: %s", id)
+		}
+		seen[id] = true
+	}
+}

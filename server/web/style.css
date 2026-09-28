@@ -349,3 +349,5 @@ a.link { color: var(--accent); text-decoration: none; }
 a.link:hover { text-decoration: underline; }
 
 .notice { border: 1px solid #fecaca; background: var(--red-soft); color: var(--red); padding: 10px 14px; margin-bottom: 14px; border-radius: 8px; font-size: 12px; }
+/* 进行中状态（M7-F1 轮询）：中性靛蓝，区别于错误态的红色 */
+.notice.progress { border-color: #c7d2fe; background: var(--accent-soft); color: var(--accent); }

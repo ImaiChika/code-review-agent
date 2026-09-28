@@ -23,6 +23,7 @@
 package server
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -32,8 +33,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 
+	"code-review-agent/diff"
 	"code-review-agent/report"
 	"code-review-agent/review"
 	"code-review-agent/rules"
@@ -49,12 +51,14 @@ const Version = "1.0.0"
 
 // Config 服务配置。
 type Config struct {
-	Port        int    // HTTP 端口
-	DBPath      string // SQLite 路径
-	DataDir     string // 审查产物目录（报告/审计日志）
-	RulesDir    string // YAML 自定义规则目录（可空）
-	SandboxMode string // 仓库审查的沙箱模式：off / container / local
-	SampleDir   string // 示例 diff 目录（可空）
+	Port        int           // HTTP 端口
+	DBPath      string        // SQLite 路径
+	DataDir     string        // 审查产物目录（报告/审计日志）
+	RulesDir    string        // YAML 自定义规则目录（可空）
+	SandboxMode string        // 仓库审查的沙箱模式：off / container / local
+	SampleDir   string        // 示例 diff 目录（可空）
+	Workers     int           // 异步审查并发 worker 数（M7-F1；<1 = 1，默认串行执行）
+	TaskTimeout time.Duration // 单任务看门狗上限（M7-F1；<=0 = 10 分钟）
 }
 
 // Server 代码审查 HTTP 服务。
@@ -63,10 +67,10 @@ type Server struct {
 	store storage.Store
 	mux   *http.ServeMux
 	srv   *http.Server
-	mu    sync.Mutex // 串行化审查请求，规避 SQLite 并发写
+	queue *reviewQueue // M7-F1：异步审查队列（替代原全局互斥的同步执行）
 }
 
-// New 创建并初始化服务（打开数据库、注册路由）。
+// New 创建并初始化服务（打开数据库、注册路由、启动审查 worker）。
 func New(cfg Config) (*Server, error) {
 	if err := review.EnsureOutputDir(cfg.DataDir); err != nil {
 		return nil, err
@@ -81,6 +85,7 @@ func New(cfg Config) (*Server, error) {
 		store: store,
 		mux:   http.NewServeMux(),
 	}
+	s.queue = newReviewQueue(store, cfg.Workers, cfg.TaskTimeout)
 	s.routes()
 	return s, nil
 }
@@ -99,6 +104,9 @@ func (s *Server) ListenAndServe() error {
 
 // Close 关闭服务与数据库连接。
 func (s *Server) Close() error {
+	if s.queue != nil {
+		s.queue.Close()
+	}
 	if s.srv != nil {
 		_ = s.srv.Close()
 	}
@@ -188,6 +196,38 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// M7-F1：入队前同步预检（纯 CPU / 一次 stat，毫秒级），
+	// 保持 F8 的错误语义——非法输入与空变更仍然当场返回 400/422，
+	// 只有执行期错误才落在任务状态里。
+	var inputType, inputPath string
+	switch {
+	case req.DiffContent != "":
+		inputType, inputPath = "diff_content", "api-upload"
+		files, err := diff.ReadFromContent(req.DiffContent)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": "+err.Error())
+			return
+		}
+		if len(files) == 0 {
+			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
+			return
+		}
+		added := 0
+		for i := range files {
+			added += len(files[i].AddedLines())
+		}
+		if added == 0 {
+			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
+			return
+		}
+	default:
+		inputType, inputPath = "repo_path", req.RepoPath
+		if _, err := os.Stat(req.RepoPath); err != nil {
+			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": 仓库路径不可访问: "+req.RepoPath)
+			return
+		}
+	}
+
 	// 沙箱策略：默认关闭；显式要求且给了仓库路径时启用
 	sandboxMode := review.SandboxOff
 	if req.Sandbox && req.RepoPath != "" {
@@ -197,33 +237,39 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	rep, err := review.Run(review.Options{
-		DiffContent: req.DiffContent,
-		RepoPath:    req.RepoPath,
-		LLMMode:     req.LLMMode,
-		RulesDir:    s.cfg.RulesDir,
-		DBPath:      s.cfg.DBPath,
-		OutputDir:   s.cfg.DataDir,
-		SandboxMode: sandboxMode,
-		AuditFile:   "tool_safety_audit.jsonl",
-	})
-	if err != nil {
-		// M7-F8：语义化错误映射——输入不可用 400，合法但无变更 422，其余 500
-		switch {
-		case errors.Is(err, review.ErrNoChanges):
-			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
-		case errors.Is(err, review.ErrInvalidInput):
-			writeErr(w, http.StatusBadRequest, err.Error())
-		default:
-			writeErr(w, http.StatusInternalServerError, err.Error())
+	// M7-F1：任务 ID 在入队时预分配（202 响应与 review.Run 落库用同一个）
+	taskID := review.NewTaskID()
+	job := &queuedJob{
+		id:        taskID,
+		inputType: inputType,
+		inputPath: inputPath,
+		submitted: time.Now(),
+		opts: review.Options{
+			DiffContent: req.DiffContent,
+			RepoPath:    req.RepoPath,
+			TaskID:      taskID,
+			LLMMode:     req.LLMMode,
+			RulesDir:    s.cfg.RulesDir,
+			DBPath:      s.cfg.DBPath,
+			OutputDir:   s.cfg.DataDir,
+			SandboxMode: sandboxMode,
+			AuditFile:   "tool_safety_audit.jsonl",
+		},
+	}
+	if err := s.queue.submit(job); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, errQueueFull) || errors.Is(err, errQueueClosed) {
+			status = http.StatusServiceUnavailable
 		}
+		writeErr(w, status, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, rep)
+	// M7-F1：202 + task_id，结果由 GET /api/tasks/{id} 轮询
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task_id": job.id,
+		"status":  "queued",
+	})
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +302,41 @@ func (s *Server) handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.store.GetTask(taskID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "任务不存在: "+taskID)
+		// DB 还没有该任务的行：要么是异步队列里的进行中/刚终态任务（M7-F1 内存注册表），
+		// 要么真的不存在。
+		if errors.Is(err, sql.ErrNoRows) {
+			if job := s.queue.lookup(taskID); job != nil {
+				st, errMsg := job.getStatus()
+				writeJSON(w, http.StatusOK, map[string]any{
+					"task": map[string]any{
+						"task_id":    job.id,
+						"status":     st,
+						"input_type": job.inputType,
+						"input_path": job.inputPath,
+						"started_at": job.submitted,
+						"error_msg":  errMsg,
+					},
+					"report":               nil,
+					"sandbox_runs":         []any{},
+					"permission_decisions": []any{},
+				})
+				return
+			}
+			writeErr(w, http.StatusNotFound, "任务不存在: "+taskID)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 失败任务（异步失败由队列补记，无报告可读）
+	if task.Status == storage.TaskStatusFailed {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"task":                 task,
+			"report":               nil,
+			"sandbox_runs":         []*storage.SandboxRun{},
+			"permission_decisions": []*storage.PermissionDecision{},
+		})
 		return
 	}
 

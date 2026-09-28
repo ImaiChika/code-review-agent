@@ -29,6 +29,7 @@ import (
 type Store interface {
 	// 任务管理
 	CreateTask(task *ReviewTask) error
+	CreateFailedTask(task *ReviewTask, errMsg string) error
 	GetTask(taskID string) (*ReviewTask, error)
 	UpdateTaskStatus(taskID string, status TaskStatus) error
 	ListTasks(limit int) ([]*ReviewTask, error)
@@ -283,6 +284,23 @@ func (s *SQLiteStore) CreateTask(task *ReviewTask) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskID, task.Status, task.InputType, task.InputPath,
 		task.FilesCount, task.GoFilesCount, task.StartedAt,
+	)
+	return err
+}
+
+// CreateFailedTask 创建一条已失败的任务记录（M7-F1 异步队列用）。
+// 审查在落库前失败（执行出错/超时）时没有任何任务行，由队列侧补记，
+// 保证失败历史与错误原因可按 task_id 查询。
+func (s *SQLiteStore) CreateFailedTask(task *ReviewTask, errMsg string) error {
+	completedAt := time.Now()
+	duration := completedAt.Sub(task.StartedAt).Round(time.Millisecond).String()
+	_, err := s.db.Exec(
+		`INSERT INTO cr_review_tasks
+		   (task_id, status, input_type, input_path, files_count, go_files_count,
+		    started_at, completed_at, duration, error_msg)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.TaskID, TaskStatusFailed, task.InputType, task.InputPath,
+		task.FilesCount, task.GoFilesCount, task.StartedAt, completedAt, duration, errMsg,
 	)
 	return err
 }
