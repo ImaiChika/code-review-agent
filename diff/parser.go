@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -447,6 +448,35 @@ func ReadFromFilePaths(paths []string) ([]FileDiff, error) {
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("文件列表为空")
+	}
+	return files, nil
+}
+
+// NamedContent 一份内存中的文件内容（M7-F3，零门槛输入）。
+type NamedContent struct {
+	Name    string // 文件名（如 main.go、pkg/util.go；作为报告中的文件路径）
+	Content string // 完整文件内容
+}
+
+// ReadFromContents 把内存中的完整文件内容按"新增行"构造 FileDiff（M7-F3）。
+//
+// 语义与 ReadFromFilePaths 相同（整体按新增行审查），但内容来自内存
+// （HTTP 上传 / 前端粘贴），不落盘。按 Name 排序保证输出顺序稳定。
+func ReadFromContents(contents []NamedContent) ([]FileDiff, error) {
+	ordered := make([]NamedContent, len(contents))
+	copy(ordered, contents)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
+
+	var files []FileDiff
+	for _, nc := range ordered {
+		name := strings.TrimSpace(nc.Name)
+		if name == "" || nc.Content == "" {
+			continue
+		}
+		files = append(files, buildWholeFileDiff(name, nc.Content))
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("文件内容为空")
 	}
 	return files, nil
 }

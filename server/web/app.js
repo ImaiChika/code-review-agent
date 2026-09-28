@@ -244,6 +244,9 @@ async function viewReview() {
 
     <div class="tabs">
       <div class="tab on" id="tab-diff" onclick="switchSource('diff')">粘贴 DIFF ${help("unified diff 格式：以 ---/+++ 开头，@@ 标注行号区间，+ 开头为新增行。只审查新增行")}</div>
+      <div class="tab" id="tab-code" onclick="switchSource('code')">粘贴代码 ${help("不懂 diff？直接粘贴整个代码文件，全部内容按新增行审查")}</div>
+      <div class="tab" id="tab-upload" onclick="switchSource('upload')">上传文件 ${help("选择一个或多个文本文件（.go 等），或一个 zip 压缩包；≤10MB，zip 内 ≤500 个文件、单个 ≤2MB；二进制文件自动跳过")}</div>
+      <div class="tab" id="tab-pr" onclick="switchSource('pr')">GitHub PR ${help("粘贴 GitHub PR 链接（github.com/{owner}/{repo}/pull/123）或简写 owner/repo#123，自动拉取该 PR 的 diff 审查。公开仓库无需凭证；服务端配置 GITHUB_TOKEN 可提升限额")}</div>
       <div class="tab" id="tab-repo" onclick="switchSource('repo')">仓库路径 ${help("填写服务器本机 git 仓库路径，取其未提交变更进行审查")}</div>
     </div>
 
@@ -252,6 +255,31 @@ async function viewReview() {
       <div class="field">
         <label>DIFF 内容</label>
         <textarea class="ta" id="ta-diff" placeholder="--- a/creds.go&#10;+++ b/creds.go&#10;@@ -1,2 +1,4 @@&#10; package creds&#10;&#10;+var apiKey = &quot;sk-...&quot;"></textarea>
+      </div>
+    </div>
+
+    <div id="src-code" style="display:none">
+      <div class="field">
+        <label>文件名</label>
+        <input class="in" id="in-code-name" value="main.go" placeholder="main.go 或 pkg/util.go">
+      </div>
+      <div class="field">
+        <label>代码内容</label>
+        <textarea class="ta" id="ta-code" placeholder="package main&#10;&#10;var apiKey = &quot;...&quot;"></textarea>
+      </div>
+    </div>
+
+    <div id="src-upload" style="display:none">
+      <div class="field">
+        <label>选择文件（可多选；.go 等文本文件，或 .zip 压缩包）</label>
+        <input class="in" type="file" id="in-upload" multiple>
+      </div>
+    </div>
+
+    <div id="src-pr" style="display:none">
+      <div class="field">
+        <label>GitHub PR 链接</label>
+        <input class="in" id="in-pr" placeholder="https://github.com/owner/repo/pull/123 或 owner/repo#123">
       </div>
     </div>
 
@@ -270,15 +298,19 @@ async function viewReview() {
 
     <div id="review-result" style="margin-top:22px"></div>
   </div>`;
-  log("就绪 — 粘贴 diff 或载入示例后执行");
+  log("就绪 — 粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR / 仓库路径");
 }
+
+const SRC_IDS = ["diff", "code", "upload", "pr", "repo"];
 
 function switchSource(src) {
   reviewSource = src;
-  document.getElementById("tab-diff").classList.toggle("on", src === "diff");
-  document.getElementById("tab-repo").classList.toggle("on", src === "repo");
-  document.getElementById("src-diff").style.display = src === "diff" ? "" : "none";
-  document.getElementById("src-repo").style.display = src === "repo" ? "" : "none";
+  for (const s of SRC_IDS) {
+    const tab = document.getElementById("tab-" + s);
+    const box = document.getElementById("src-" + s);
+    if (tab) tab.classList.toggle("on", s === src);
+    if (box) box.style.display = s === src ? "" : "none";
+  }
 }
 
 function loadSample(i) {
@@ -292,14 +324,51 @@ function loadSample(i) {
 
 async function submitReview() {
   const btn = document.getElementById("btn-run");
-  const body = {};
+  let submit; // () => Promise<{task_id,status}>
+
   if (reviewSource === "diff") {
-    body.diff_content = document.getElementById("ta-diff").value;
-    if (!body.diff_content.trim()) { log("diff 内容为空"); return; }
+    const diffText = document.getElementById("ta-diff").value;
+    if (!diffText.trim()) { log("diff 内容为空"); return; }
+    submit = () => api("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ diff_content: diffText }),
+    });
+  } else if (reviewSource === "code") {
+    // M7-F3：粘贴整文件 → files_content
+    const name = document.getElementById("in-code-name").value.trim() || "main.go";
+    const content = document.getElementById("ta-code").value;
+    if (!content.trim()) { log("代码内容为空"); return; }
+    submit = () => api("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files_content: { [name]: content } }),
+    });
+  } else if (reviewSource === "upload") {
+    // M7-F3：multipart 上传（多文件或 zip）
+    const input = document.getElementById("in-upload");
+    if (!input.files || !input.files.length) { log("请选择要上传的文件"); return; }
+    const fd = new FormData();
+    for (const f of input.files) fd.append("files", f, f.name);
+    submit = () => api("/api/reviews/upload", { method: "POST", body: fd });
+  } else if (reviewSource === "pr") {
+    // M7-F3：GitHub PR 链接
+    const prURL = document.getElementById("in-pr").value.trim();
+    if (!prURL) { log("请填写 GitHub PR 链接"); return; }
+    submit = () => api("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pr_url: prURL }),
+    });
   } else {
-    body.repo_path = document.getElementById("in-repo").value.trim();
-    body.sandbox = document.getElementById("cb-sandbox").checked;
-    if (!body.repo_path) { log("请填写仓库路径"); return; }
+    const repoPath = document.getElementById("in-repo").value.trim();
+    const sandbox = document.getElementById("cb-sandbox").checked;
+    if (!repoPath) { log("请填写仓库路径"); return; }
+    submit = () => api("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_path: repoPath, sandbox }),
+    });
   }
 
   btn.disabled = true;
@@ -309,11 +378,11 @@ async function submitReview() {
 
   try {
     // M7-F1：202 + task_id，结果轮询任务档案
-    const res = await api("/api/reviews", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await submit();
+    // 立即清掉上一次的结果，避免新结果到达前旧内容残留
+    document.getElementById("review-result").innerHTML =
+      `<div class="notice progress" style="display:flex;align-items:center;gap:10px">
+        <span class="spin"></span><span>排队中 … ${esc(res.task_id)}</span></div>`;
     await pollAndRender(res.task_id, t0);
   } catch (e) {
     document.getElementById("review-result").innerHTML =

@@ -577,3 +577,36 @@ func TestReadFromFilePaths_Errors(t *testing.T) {
 		t.Error("不存在的文件应报错")
 	}
 }
+
+// TestReadFromContents M7-F3：内存文件内容整体按新增行构造（上传/粘贴输入）。
+func TestReadFromContents(t *testing.T) {
+	files, err := ReadFromContents([]NamedContent{
+		{Name: "b.go", Content: "package b\n\nvar apiKey = \"x\"\n"},
+		{Name: "a.go", Content: "package a\n"},
+		{Name: "", Content: "无名文件应被跳过"},
+		{Name: "empty.go", Content: ""},
+	})
+	if err != nil {
+		t.Fatalf("ReadFromContents 失败: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("文件数 = %d, 期望 2（空名/空内容跳过）", len(files))
+	}
+	// 按 Name 排序：a.go 在前
+	if files[0].NewPath != "a.go" || files[1].NewPath != "b.go" {
+		t.Errorf("文件顺序 = [%s, %s], 期望 [a.go b.go]（排序稳定）", files[0].NewPath, files[1].NewPath)
+	}
+	// b.go 全部为新增行
+	if len(files[1].Hunks) != 1 || len(files[1].Hunks[0].Lines) != 3 {
+		t.Errorf("b.go 应为 1 个 hunk 3 行新增")
+	}
+	for _, l := range files[1].Hunks[0].Lines {
+		if l.Type != LineAdded {
+			t.Fatalf("全部行应为新增行, 得到 %v", l.Type)
+		}
+	}
+
+	if _, err := ReadFromContents(nil); err == nil {
+		t.Error("空输入应报错")
+	}
+}

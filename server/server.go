@@ -23,6 +23,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -51,18 +52,19 @@ const Version = "1.0.0"
 
 // Config 服务配置。
 type Config struct {
-	Port         int           // HTTP 端口
-	DBPath       string        // SQLite 路径
-	DataDir      string        // 审查产物目录（报告/审计日志）
-	RulesDir     string        // YAML 自定义规则目录（可空）
-	SandboxMode  string        // 仓库审查的沙箱模式：off / container / local
-	SampleDir    string        // 示例 diff 目录（可空）
-	Workers      int           // 异步审查并发 worker 数（M7-F1；<1 = 1，默认串行执行）
-	TaskTimeout  time.Duration // 单任务看门狗上限（M7-F1；<=0 = 10 分钟）
-	AuthToken    string        // 写操作认证 token（M7-F2；空 = 不启用认证）
-	RatePerSec   float64       // 审查提交限流速率/每 IP（M7-F2；<=0 = 2）
-	RateBurst    int           // 审查提交限流桶容量（M7-F2；<=0 = 10）
-	MaxBodyBytes int64         // 请求体上限（M7-F2；<=0 = 10MB）
+	Port          int           // HTTP 端口
+	DBPath        string        // SQLite 路径
+	DataDir       string        // 审查产物目录（报告/审计日志）
+	RulesDir      string        // YAML 自定义规则目录（可空）
+	SandboxMode   string        // 仓库审查的沙箱模式：off / container / local
+	SampleDir     string        // 示例 diff 目录（可空）
+	Workers       int           // 异步审查并发 worker 数（M7-F1；<1 = 1，默认串行执行）
+	TaskTimeout   time.Duration // 单任务看门狗上限（M7-F1；<=0 = 10 分钟）
+	AuthToken     string        // 写操作认证 token（M7-F2；空 = 不启用认证）
+	RatePerSec    float64       // 审查提交限流速率/每 IP（M7-F2；<=0 = 2）
+	RateBurst     int           // 审查提交限流桶容量（M7-F2；<=0 = 10）
+	MaxBodyBytes  int64         // 请求体上限（M7-F2；<=0 = 10MB）
+	GitHubAPIBase string        // GitHub API 基地址（M7-F3；空 = 官方，测试可注入假服务）
 }
 
 // 默认请求体上限 10MB：一个审查 diff 的合理上限远小于此。
@@ -141,8 +143,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/static/", s.handleStatic)
 	s.mux.HandleFunc("/api/health", s.method("GET", s.handleHealth))
-	// M7-F2：审查提交是重操作，单独包 IP 限流
+	// M7-F2/F3：审查提交是重操作，JSON 与上传端点都包 IP 限流
 	s.mux.Handle("/api/reviews", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleCreateReview))))
+	s.mux.Handle("/api/reviews/upload", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleUploadReview))))
 	s.mux.HandleFunc("/api/tasks", s.method("GET", s.handleListTasks))
 	s.mux.HandleFunc("/api/tasks/", s.method("GET", s.handleTaskDetail))
 	s.mux.HandleFunc("/api/stats", s.method("GET", s.handleStats))
@@ -204,11 +207,28 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // createReviewRequest POST /api/reviews 请求体。
 type createReviewRequest struct {
-	DiffContent string `json:"diff_content"` // diff 文本（与 repo_path 二选一）
-	RepoPath    string `json:"repo_path"`    // git 仓库路径（取未提交变更）
-	Sandbox     bool   `json:"sandbox"`      // 是否执行沙箱（仅 repo_path 有效）
-	LLMMode     string `json:"llm_mode"`     // LLM 复核（M4）："fake" 确定性回放 / "openai"（服务端需 OPENAI_API_KEY）
+	DiffContent  string            `json:"diff_content"`  // diff 文本（与 repo_path / files_content / pr_url 四选一）
+	RepoPath     string            `json:"repo_path"`     // git 仓库路径（取未提交变更，服务器本地）
+	FilesContent map[string]string `json:"files_content"` // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
+	PrURL        string            `json:"pr_url"`        // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
+	Sandbox      bool              `json:"sandbox"`       // 是否执行沙箱（仅 repo_path 有效）
+	LLMMode      string            `json:"llm_mode"`      // LLM 复核（M4）："fake" 确定性回放 / "openai"（服务端需 OPENAI_API_KEY）
 }
+
+// preflightAddedLines 检查解析出的文件里确有新增行（M7-F1 预检语义）。
+func preflightAddedLines(files []diff.FileDiff) error {
+	added := 0
+	for i := range files {
+		added += len(files[i].AddedLines())
+	}
+	if added == 0 {
+		return errNoAddedLines
+	}
+	return nil
+}
+
+// errNoAddedLines 无新增行（映射 422）。
+var errNoAddedLines = errors.New("diff 中没有可审查的变更（没有任何新增行）")
 
 func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	// M7-F2：请求体上限（超限 413）
@@ -223,16 +243,62 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.DiffContent == "" && req.RepoPath == "" {
-		writeErr(w, http.StatusBadRequest, "diff_content 与 repo_path 必须提供其一")
+	if req.DiffContent == "" && req.RepoPath == "" && len(req.FilesContent) == 0 && req.PrURL == "" {
+		writeErr(w, http.StatusBadRequest, "diff_content / repo_path / files_content / pr_url 必须提供其一")
 		return
 	}
 
-	// M7-F1：入队前同步预检（纯 CPU / 一次 stat，毫秒级），
-	// 保持 F8 的错误语义——非法输入与空变更仍然当场返回 400/422，
-	// 只有执行期错误才落在任务状态里。
+	// M7-F1/F3：入队前同步预检——非法输入与空变更当场 400/422，
+	// PR 拉取失败当场 502，只有执行期错误才落在任务状态里。
 	var inputType, inputPath string
+	var fileContents []diff.NamedContent
 	switch {
+	case req.PrURL != "":
+		ref, err := parsePRURL(req.PrURL)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": "+err.Error())
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		defer cancel()
+		diffText, err := s.fetchPRDiff(ctx, ref)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, "拉取 PR 失败: "+err.Error())
+			return
+		}
+		files, err := diff.ReadFromContent(diffText)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": PR diff 解析失败: "+err.Error())
+			return
+		}
+		if err := preflightAddedLines(files); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		inputType = "pr_url"
+		inputPath = fmt.Sprintf("%s/%s#%s", ref.Owner, ref.Repo, ref.Number)
+		req.DiffContent = diffText // 复用 diff 管线
+	case len(req.FilesContent) > 0:
+		// M7-F3：粘贴整文件；按文件名排序保证输出顺序稳定
+		names := make([]string, 0, len(req.FilesContent))
+		for name := range req.FilesContent {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fileContents = append(fileContents, diff.NamedContent{Name: name, Content: req.FilesContent[name]})
+		}
+		files, err := diff.ReadFromContents(fileContents)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": "+err.Error())
+			return
+		}
+		if err := preflightAddedLines(files); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		inputType = "file_contents"
+		inputPath = strings.Join(names, ",")
 	case req.DiffContent != "":
 		inputType, inputPath = "diff_content", "api-upload"
 		files, err := diff.ReadFromContent(req.DiffContent)
@@ -240,16 +306,8 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, review.ErrInvalidInput.Error()+": "+err.Error())
 			return
 		}
-		if len(files) == 0 {
-			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
-			return
-		}
-		added := 0
-		for i := range files {
-			added += len(files[i].AddedLines())
-		}
-		if added == 0 {
-			writeErr(w, http.StatusUnprocessableEntity, "diff 中没有可审查的变更（没有任何新增行）")
+		if err := preflightAddedLines(files); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 	default:
@@ -277,15 +335,17 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		inputPath: inputPath,
 		submitted: time.Now(),
 		opts: review.Options{
-			DiffContent: req.DiffContent,
-			RepoPath:    req.RepoPath,
-			TaskID:      taskID,
-			LLMMode:     req.LLMMode,
-			RulesDir:    s.cfg.RulesDir,
-			DBPath:      s.cfg.DBPath,
-			OutputDir:   s.cfg.DataDir,
-			SandboxMode: sandboxMode,
-			AuditFile:   "tool_safety_audit.jsonl",
+			DiffContent:  req.DiffContent,
+			FileContents: fileContents,
+			RepoPath:     req.RepoPath,
+			TaskID:       taskID,
+			InputLabel:   inputPath,
+			LLMMode:      req.LLMMode,
+			RulesDir:     s.cfg.RulesDir,
+			DBPath:       s.cfg.DBPath,
+			OutputDir:    s.cfg.DataDir,
+			SandboxMode:  sandboxMode,
+			AuditFile:    "tool_safety_audit.jsonl",
 		},
 	}
 	if err := s.queue.submit(job); err != nil {
@@ -298,6 +358,65 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// M7-F1：202 + task_id，结果由 GET /api/tasks/{id} 轮询
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task_id": job.id,
+		"status":  "queued",
+	})
+}
+
+// handleUploadReview POST /api/reviews/upload（M7-F3，multipart/form-data）：
+// 字段 files——一个或多个文本文件，或单个 .zip；整体按新增行审查。
+func (s *Server) handleUploadReview(w http.ResponseWriter, r *http.Request) {
+	// multipart 大小受同一 maxBody 上限约束（超限 413）
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+	if err := r.ParseMultipartForm(s.maxBody); err != nil {
+		if bodyTooLarge(err) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("上传超过上限 %d MB", s.maxBody>>20))
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "解析 multipart 表单失败: "+err.Error())
+		return
+	}
+	if r.MultipartForm == nil {
+		writeErr(w, http.StatusBadRequest, "没有 multipart 表单（字段名 files）")
+		return
+	}
+	contents, err := parseUploadFiles(r.MultipartForm)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	names := make([]string, 0, len(contents))
+	for _, nc := range contents {
+		names = append(names, nc.Name)
+	}
+
+	taskID := review.NewTaskID()
+	job := &queuedJob{
+		id:        taskID,
+		inputType: "upload",
+		inputPath: strings.Join(names, ","),
+		submitted: time.Now(),
+		opts: review.Options{
+			FileContents: contents,
+			TaskID:       taskID,
+			InputLabel:   strings.Join(names, ","),
+			RulesDir:     s.cfg.RulesDir,
+			DBPath:       s.cfg.DBPath,
+			OutputDir:    s.cfg.DataDir,
+			SandboxMode:  review.SandboxOff,
+			AuditFile:    "tool_safety_audit.jsonl",
+		},
+	}
+	if err := s.queue.submit(job); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, errQueueFull) || errors.Is(err, errQueueClosed) {
+			status = http.StatusServiceUnavailable
+		}
+		writeErr(w, status, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"task_id": job.id,
 		"status":  "queued",

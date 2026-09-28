@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"code-review-agent/diff"
 	"code-review-agent/report"
 )
 
@@ -368,5 +369,33 @@ func TestNewTaskID_Unique(t *testing.T) {
 			t.Fatalf("task ID 冲突: %s", id)
 		}
 		seen[id] = true
+	}
+}
+
+// TestRun_FileContents M7-F3：内存文件内容输入（上传/粘贴）端到端冒烟。
+func TestRun_FileContents(t *testing.T) {
+	outDir := t.TempDir()
+	rep, err := Run(Options{
+		FileContents: []diff.NamedContent{
+			{Name: "leak.go", Content: "package leak\n\nvar apiKey = \"sk-live-q1w2e3r4t5y6u7i8o9p0\"\n"},
+		},
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	if rep.InputType != "file_contents" {
+		t.Errorf("input_type = %q, 期望 file_contents", rep.InputType)
+	}
+	found := false
+	for _, f := range rep.Findings {
+		if f.RuleID == "SEC-AST-001" && f.File == "leak.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("粘贴代码中的硬编码密钥应被 SEC-AST-001 检出")
 	}
 }

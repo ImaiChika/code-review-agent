@@ -104,25 +104,27 @@ const SandboxOff = "off"
 
 // Options 一次审查的全部输入。
 //
-// 输入来源优先级：DiffFile > DiffContent > Files > RepoPath（四选一）。
+// 输入来源优先级：DiffFile > DiffContent > FileContents > Files > RepoPath（五选一）。
 type Options struct {
-	DiffFile         string   // diff 文件路径
-	DiffContent      string   // 内存中的 diff 文本（HTTP API 上传）
-	Files            []string // 文件路径列表（M2-D5：整体按新增行审查）
-	RepoPath         string   // git 仓库路径（取未提交变更；此模式才可能触发沙箱）
-	RulesDir         string   // YAML 自定义规则目录（可空）
-	DBPath           string   // SQLite 路径
-	OutputDir        string   // 报告输出目录
-	SandboxMode      string   // "container" / "container-fx" / "e2b" / "local" / "off"；空 = container
-	LLMMode          string   // LLM 复核模式（M4）："fake"（确定性回放）/ "openai"（兼容 API）；空 = 关闭
-	LLMModelName     string   // openai 模式模型名（默认 gpt-4o-mini）
-	LLMBaseURL       string   // openai 兼容端点（ollama: http://localhost:11434/v1）
-	LLMFakeResponses []string // fake 模式的预设判定响应（按序回放；空 = 默认全 CONFIRM；测试/脚本用）
-	AuditFile        string   // 审计日志路径；空 = 默认 tool_safety_audit.jsonl 落 OutputDir
-	SkillsDir        string   // CR Skill 目录（M1-B1；空 = 自动探测 ./skills，找不到则报告不含 skill 元数据）
-	TaskID           string   // 预分配的任务 ID（M7-F1 异步队列用；空 = 自动生成）
-	DryRun           bool     // 不写数据库、不执行沙箱
-	Verbose          bool     // 过程日志打到 stdout
+	DiffFile         string              // diff 文件路径
+	DiffContent      string              // 内存中的 diff 文本（HTTP API 上传）
+	FileContents     []diff.NamedContent // M7-F3：内存文件内容（上传/粘贴），整体按新增行审查
+	Files            []string            // 文件路径列表（M2-D5：整体按新增行审查）
+	RepoPath         string              // git 仓库路径（取未提交变更；此模式才可能触发沙箱）
+	RulesDir         string              // YAML 自定义规则目录（可空）
+	DBPath           string              // SQLite 路径
+	OutputDir        string              // 报告输出目录
+	SandboxMode      string              // "container" / "container-fx" / "e2b" / "local" / "off"；空 = container
+	LLMMode          string              // LLM 复核模式（M4）："fake"（确定性回放）/ "openai"（兼容 API）；空 = 关闭
+	LLMModelName     string              // openai 模式模型名（默认 gpt-4o-mini）
+	LLMBaseURL       string              // openai 兼容端点（ollama: http://localhost:11434/v1）
+	LLMFakeResponses []string            // fake 模式的预设判定响应（按序回放；空 = 默认全 CONFIRM；测试/脚本用）
+	AuditFile        string              // 审计日志路径；空 = 默认 tool_safety_audit.jsonl 落 OutputDir
+	SkillsDir        string              // CR Skill 目录（M1-B1；空 = 自动探测 ./skills，找不到则报告不含 skill 元数据）
+	InputLabel       string              // 输入来源标签（M7-F3；非空时覆盖报告/落库的 input_path，如 PR 链接、上传文件清单）
+	TaskID           string              // 预分配的任务 ID（M7-F1 异步队列用；空 = 自动生成）
+	DryRun           bool                // 不写数据库、不执行沙箱
+	Verbose          bool                // 过程日志打到 stdout
 }
 
 // NewTaskID 生成任务 ID：秒级时间戳 + 随机后缀。
@@ -136,8 +138,8 @@ func NewTaskID() string {
 // 流程：读 diff → 规则引擎 → （可选）沙箱 → 去重 → 评分 → 报告 → 落库。
 // 报告文件（review_report.json/md）写入 opts.OutputDir。
 func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
-	if opts.DiffFile == "" && opts.DiffContent == "" && len(opts.Files) == 0 && opts.RepoPath == "" {
-		return nil, errors.New("必须指定 DiffFile / DiffContent / Files / RepoPath 之一")
+	if opts.DiffFile == "" && opts.DiffContent == "" && len(opts.FileContents) == 0 && len(opts.Files) == 0 && opts.RepoPath == "" {
+		return nil, errors.New("必须指定 DiffFile / DiffContent / FileContents / Files / RepoPath 之一")
 	}
 	sandboxMode := opts.SandboxMode
 	if sandboxMode == "" {
@@ -202,6 +204,19 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: 读取文件列表失败: %w", ErrInvalidInput, err)
 		}
+	case len(opts.FileContents) > 0:
+		// M7-F3：内存文件内容（上传/粘贴），整体按新增行审查
+		inputType = "file_contents"
+		names := make([]string, 0, len(opts.FileContents))
+		for _, nc := range opts.FileContents {
+			names = append(names, nc.Name)
+		}
+		inputPath = strings.Join(names, ",")
+		var err error
+		files, err = diff.ReadFromContents(opts.FileContents)
+		if err != nil {
+			return nil, fmt.Errorf("%w: 解析文件内容失败: %w", ErrInvalidInput, err)
+		}
 	default:
 		inputType = "repo_path"
 		inputPath = opts.RepoPath
@@ -214,6 +229,10 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 
 	if len(files) == 0 {
 		return nil, ErrNoChanges
+	}
+	// M7-F3：调用方提供的输入来源标签（PR 链接 / 上传清单）优先展示
+	if opts.InputLabel != "" {
+		inputPath = opts.InputLabel
 	}
 	// M7-F8（P2-10）：所有文件都没有新增行（纯上下文/纯删除的 diff）时，
 	// 与"解析不出文件"同语义返回 ErrNoChanges——规则只扫新增行，
