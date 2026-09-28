@@ -108,3 +108,45 @@ jobs:
           name: staticcheck-live-report
           path: .run/staticcheck-live/review_report.json
           if-no-files-found: ignore
+
+  server-image:
+    name: 服务镜像实机验证（Dockerfile.server + compose 配置）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建服务镜像（多阶段，CGO）
+        run: docker build -f Dockerfile.server -t code-review-agent:ci .
+
+      - name: 容器启动 + 健康检查 + 认证验证
+        run: |
+          docker run -d --name cra-ci -p 8080:8080 \
+            -e AUTH_TOKEN=ci-secret-token \
+            -v cra-ci-data:/data code-review-agent:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8080/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:8080/api/health
+          echo
+          # 无 token 写操作应 401；带 token 应 202
+          code1=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/reviews \
+            -H 'Content-Type: application/json' -d '{"diff_content":""}')
+          code2=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/reviews \
+            -H 'X-Auth-Token: ci-secret-token' -H 'Content-Type: application/json' \
+            -d '{"diff_content":"--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,3 @@\n package x\n \n+var ok = 1\n"}')
+          echo "no-token=$code1 with-token=$code2"
+          test "$code1" = "401" && test "$code2" = "202"
+
+      - name: 数据卷持久化验证（容器重建后数据仍在）
+        run: |
+          docker rm -f cra-ci
+          docker run -d --name cra-ci2 -p 8080:8080 \
+            -e AUTH_TOKEN=ci-secret-token \
+            -v cra-ci-data:/data code-review-agent:ci
+          sleep 3
+          count=$(curl -sf 'http://localhost:8080/api/tasks?limit=10' | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
+          echo "重启后任务数: $count"
+          test "$count" -ge 1
+          docker rm -f cra-ci2
+          docker volume rm cra-ci-data

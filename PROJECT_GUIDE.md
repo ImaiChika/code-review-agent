@@ -430,7 +430,7 @@ rules:
 | 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（含前端展开态 DOM 实测） | 维持 0 泄漏硬门禁 |
 | 框架接入 | **6 处真接入**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
 | LLM 能力 | `--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | C3 修复建议生成 + 真模型 precision 对照 |
-| 服务形态 | CLI + Web 控制台 + MCP stdio；**M7-F1 起异步化**：202 + worker 队列 + 前端轮询（并发提交实测 1ms 级响应，不再互相阻塞）；认证/限流/白名单待 M7-F2/F4 | **M7 上线级**：认证限流 + 白名单 + Docker 部署 |
+| 服务形态 | CLI + Web 控制台 + MCP stdio；**M7 全部落地**：异步队列（1ms 202）/ 认证限流 / 白名单 / 零门槛输入×5 / 趋势看板 / HTML 报告 / Docker compose（实机验证在 CI） | **M8**：LLM 修复建议、记忆降噪、类型增强、跨函数分析 |
 | CI / 自举 | GitHub Actions 实跑全绿：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查 | 维持门禁纪律 |
 | 提交规范 | hooks + CI 双层校验 | Conventional Commits 强制，不合规不合入 |
 | 测试 | 13 包全绿（-race）+ 39 样本数据集门禁 | 全绿 + 数据集门禁 + `-race`，门禁红不合代码 |
@@ -579,7 +579,7 @@ rules:
 > - **前端/API 实测**（Playwright 浏览器 + curl 全端点）：五个视图全部可用、零 console 错误；示例一键载入、diff 提交、severity 筛选、任务档案、报告下载均正常；XSS 注入被转义（无 dialog/无可执行节点）；**展开态 DOM 全文无明文密钥**（脱敏链路端到端有效）；并发 3 审查经互斥串行全部 200；repo+sandbox 模式沙箱真实执行（go vet=0 / go test=0 / staticcheck=127 未装优雅记录）。
 > - **记录在案未修**：P2-10（纯上下文 diff 得 200 空报告）、P2-11（stats 上限 200 失真 + O(N) 解析）、P3-12（500 语义 / Version 硬编码 / 无请求体上限与超时）——均归入 M7。
 
-#### M7 · 上线可用（v1.1，2026-10-01 → 10-21，约 26h）▶ 下一阶段主战场
+#### M7 · 上线可用（v1.1，2026-10-01 → 10-21，约 26h）▶ 全部任务完成（2026-09-29，F8→F1→F2→F3→F4→F5→F6→F7）
 
 > 用户目标：**把前端真正上线给更多人用**。当前架构是"单机演示级"：同步 POST（沙箱审查 30s+ 会阻塞所有用户）、全局互斥串行、无认证/限流/请求上限、repo_path 接受任意主机路径。M7 的每一项都直接对应这些实测暴露的约束（§六 P3-12），完成即具备小团队自部署条件。M6 遗留的 React 重构/规则在线编辑器继续留在 backlog，不影响上线。
 
@@ -591,7 +591,7 @@ rules:
 | F4 仓库路径白名单 | `--allow-repo` 前缀白名单 + 路径规范校验，封掉"任意主机路径"暴露面（P3-12）；上传模式作为无白名单时的替代入口 | ✅ 2026-09-29 |
 | F5 趋势看板（E3 + 修 P2-11） | 风险分冗余进 `cr_review_tasks`，stats 改 SQL 聚合（按天任务数/评分分布/规则 TopN），前端趋势视图 | ✅ 2026-09-29 |
 | F6 HTML 单文件报告（D6） | 审查多输出自包含 HTML（severity 筛选/六维图/可折叠），任务详情可直接下载转发 | ✅ 2026-09-29 |
-| F7 部署形态（E5） | Docker compose（服务 + 数据卷）一条命令起；反代 TLS 说明；备份/升级文档"5 分钟自部署" |
+| F7 部署形态（E5） | Docker compose（服务 + 数据卷）一条命令起；反代 TLS 说明；备份/升级文档"5 分钟自部署" | ✅ 2026-09-29 |
 | F8 顺手修（P2-10/P3-12 部分） | 0 新增行 diff → 422 友好提示；repo_path 不存在 → 400；`errors.Is`；Version 核查 | ✅ 2026-09-28 |
 
 **退出标准**：两个用户同时提交审查不互相阻塞（异步队列 + 各自进度）；无 token 无法写操作；公网暴露面仅剩上传/白名单仓库；`docker compose up` 后 5 分钟内新用户完成首次审查；全量测试与数据集门禁不回退。
@@ -605,7 +605,9 @@ rules:
 > - ✅ **F4 仓库路径白名单完成（2026-09-29，S 级）**：serve 新增 `--allow-repo`（逗号分隔多前缀）；配置后 `repo_path` 经 `checkRepoAllowed` 校验——路径 Abs+Clean 规范化（穿越路径落点重查）、**目录边界匹配**（`/tmp/repos` 不放行前缀相似的 `/tmp/repositories`，`HasPrefix(prefix+Separator)`）、越界 403（策略拒绝先于存在性检查；白名单内但不存在仍 400）。未配置 = 不限制（本地模式行为不变，文档建议公网部署必配）。测试：`repoallow_test.go` 6 用例（放行/越界 403+边界内 400 对照/目录边界/穿越规范化/多前缀/未配置不变）；全量 13 包 `-race` 全绿。实机双实例冒烟：白名单内真实仓库 202 → 浏览器审查完成；白名单外 `/tmp` 403、`../..` 穿越 403、相似前缀目录 403；无白名单实例任意路径 202 不变。
 > - ✅ **F5 趋势看板完成（2026-09-29，修 P2-11）**：① `cr_review_tasks` 冗余 `risk_score`/`risk_grade` 两列（`migrateColumns` 幂等迁移——PRAGMA 检查缺列才 ALTER，**旧 v1.0 库文件打开即自动升级**，旧数据默认 0/空可读可写）；`review.Run` 落库时写入评分。② `storage.GetTrendStats()`：全量 COUNT/AVG/MAX + 最近 30 天按天聚合 + 最近 10 任务，**O(1) SQL 聚合替代逐条解析报告 JSON**（P2-11 两条失真/低效全修：total_tasks 全量准确、看板刷新成本与任务数无关）。③ `/api/stats` 新增 `trend_daily`，原字段语义不变。④ 前端 dashboard 新增"近 30 天趋势"面板（零依赖手写 SVG：柱=每日任务数、橙色点线=当日均分、图例与日期轴）。**实机抓到并修复时区漂移 bug**：Go driver 存 RFC3339 带 +08:00，SQLite `date()` 会折算 UTC 日期——本地 00:30 的任务被记到"昨天"；改用 `substr(started_at,1,10)` 取写入时本地日期 + `date('now','localtime')` 比较窗口，实测本地凌晨跨日任务落对。测试：storage +2（聚合正确性含 30 天窗口外老任务/旧库迁移自动补列）、server +1（**250 任务后 total_tasks 仍全量准确**）；全量 13 包 `-race` 全绿、数据集门禁不回退。实机：真实审查 + 历史种子数据，trend_daily 按天分布正确；浏览器截图视觉验收通过（趋势图/图例/tooltip 正常，顺带修掉 help() 误入 panel label 被转义的渲染 bug）。
 > - ✅ **F6 HTML 单文件报告完成（2026-09-29，D6 落地）**：新增 `report/html.go` `ReviewReport.ToHTML()`——自包含单文件（CSS/JS 全内联，单测断言无 `src=/href="http` 外部引用），原生 `<details>/<summary>` 折叠 + ~15 行 severity 筛选 JS + 六维评分横条（`Monitor.RiskBreakdown` 新字段，omitempty 向后兼容，`scoring.Calculate` 的 Breakdown 首次进入报告 JSON）；evidence 在深色代码块中渲染，REDACTED 占位黄色高亮；HTML 层全部转义（XSS 单测覆盖）。**输出三路**：① CLI `writeReports` 多写 `review_report.html`；② `collectArtifacts` 收集 HTML 入 `cr_artifacts`（扩展名白名单加 `.html`）；③ `GET /api/tasks/{id}/report?format=html` 即时生成（`Content-Disposition: inline`，浏览器直接打开，免表迁移），任务详情页加"HTML 报告"链接。测试：report +4（核心内容/自包含无外部资源/空报告/XSS 转义）+ artifact 收集与白名单更新；全量 13 包 `-race` 全绿、数据集门禁不回退。实机：CLI 三格式文件齐全、端点 200 + text/html、artifact 表 html 行入库；`file://` 离线打开截图视觉验收通过（评分/六维/折叠/筛选/高亮全正常）。
-> - ⏭ 下一步：F7 Docker compose 部署（M7 收官），随后按 §7.2 M7 退出标准整体验收。
+> - ✅ **F7 Docker 部署完成（2026-09-29，M7 收官）**：新增 `Dockerfile.server`（**与根 Dockerfile 的 cr-sandbox 沙箱镜像独立**，多阶段构建：golang:1.23-alpine + CGO（go-sqlite3 需 gcc/musl）→ alpine:3.20 运行时，VOLUME /data，默认 `serve --port 8080 --db /data/review.db --data-dir /data/reports`）+ `.dockerignore`（上下文瘦身）+ `docker-compose.yml`（卷 cra-data 持久化、healthcheck 走 /api/health、env 透传 AUTH_TOKEN/ALLOW_REPOS/GITHUB_TOKEN、repo 挂载进阶注释）。serve 新增**环境变量回退**（flag 优先，12-factor 容器注入）。README 新增"Docker 部署（5 分钟自部署）"一节（启动/备份/认证分发/TLS 反代/四种免挂载入口说明）。CI 新增 `server-image` job（本机无 Docker daemon，实机验证放 GitHub Actions runner——M3 先例）：镜像构建 → 容器启动健康检查 → **认证 401/202 验证** → **数据卷持久化验证**（容器重建后任务数保留）。部署资产静态契约测试 `deploy_test.go` 14 项断言（Dockerfile/compose/README/serve env 契约互锁，防参数漂移）；全量 13 包 `-race` 全绿。
+>
+> **✅ M7 退出标准验收（2026-09-29，逐项）**：① 两个用户同时提交审查不互相阻塞 ✅（F1：异步队列，并发提交实测 1ms 级 202 + 各自轮询进度）；② 无 token 无法写操作 ✅（F2：401 constant-time，读公开）；③ 公网暴露面收敛 ✅（F4 白名单封 repo_path + F2 认证 + F2/F3 请求体上限与限流；四种免挂载输入入口）；④ `docker compose up` 5 分钟首次审查 ✅/⏳（文件与 env 契约就绪并有静态测试锁死，**镜像构建+容器实机验证在 CI `server-image` job 推送后实跑**——本机 Docker daemon 未运行，同 M3 处理方式）；⑤ 全量测试与数据集门禁不回退 ✅（13 包 `-race` 全绿 + 39 样本 100%/100%/0%）。**M7 全部 8 任务完成**，待 CI 实跑确认后可打 tag `v1.1.0`（§7.7）。
 
 #### M8 · 智能化增强（v1.2，2026-10-22 → 11-11，约 24h）
 

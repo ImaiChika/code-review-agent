@@ -77,6 +77,19 @@ go build -o code-review-agent .
 | `--dry-run` | false | 不写数据库 |
 | `--verbose` | false | 详细输出 |
 
+### Docker 部署（5 分钟自部署，M7-F7）
+
+```bash
+docker compose up -d      # 首次自动构建镜像，随后启动
+# 浏览器打开 http://localhost:8080
+docker compose logs -f    # 看日志；docker compose down 停止（数据保留）
+```
+
+- 数据（SQLite + 报告 + 审计日志）全部落在卷 `cra-data`，升级镜像不丢数据；备份即 `docker run --rm -v cra-data:/data -v $PWD:/b alpine cp /data/review.db /b/`。
+- 可选配置写入 `.env`：`AUTH_TOKEN`（写操作认证，设置后分发 `http://host:8080/?token=xxx` 链接）、`GITHUB_TOKEN`（提升 PR 拉取限额）。
+- 粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR 四种入口无需任何额外挂载；如需在容器内审查本机仓库（repo 模式），把仓库目录只读挂进容器并在 `.env` 设 `ALLOW_REPOS=/repos`（容器内路径），见 `docker-compose.yml` 内注释。
+- 反向代理 TLS（nginx/Caddy）按常规 HTTP 服务转发 8080 即可；对外强烈建议同时设置 `AUTH_TOKEN`。
+
 ## 项目结构
 
 ```

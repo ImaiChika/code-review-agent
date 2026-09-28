@@ -1,0 +1,43 @@
+# docker-compose.yml — code-review-agent 一条命令自部署（M7-F7）
+#
+#   docker compose up -d          # 启动（首次自动构建镜像）
+#   docker compose logs -f        # 看日志
+#   docker compose down           # 停止（数据保留在卷 cra-data 中）
+#
+# 启动后浏览器打开 http://localhost:8080 即可使用；
+# 数据（SQLite + 报告 + 审计日志）全部落卷 cra-data，升级镜像不丢数据。
+#
+# 可选配置（.env 文件或环境变量）：
+#   AUTH_TOKEN=xxx        写操作认证；设置后分发 http://host:8080/?token=xxx 链接
+#   ALLOW_REPOS=/repos    仓库路径白名单前缀（容器内路径，配合挂载使用）
+#   GITHUB_TOKEN=ghp_xxx  GitHub API 限额提升（PR 拉取）
+
+services:
+  code-review-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: code-review-agent:latest
+    container_name: code-review-agent
+    ports:
+      - "8080:8080"
+    volumes:
+      - cra-data:/data
+      # 进阶：容器内审查本机仓库（repo 模式）才需要——把宿主仓库目录只读挂进容器，
+      # 并设置 ALLOW_REPOS 为容器内路径。粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR 四种
+      # 入口不需要任何挂载。
+      # - /home/work/repos:/repos:ro
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      - ALLOW_REPOS=${ALLOW_REPOS:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  cra-data:

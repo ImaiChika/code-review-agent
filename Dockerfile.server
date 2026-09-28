@@ -1,0 +1,34 @@
+# Dockerfile.server — code-review-agent 服务镜像（M7-F7）
+#
+# 注意：根目录 Dockerfile 是沙箱镜像 cr-sandbox（M3，预装 staticcheck），
+# 两者独立：本文件构建的是 Web 服务本体，多阶段构建，最终镜像仅含二进制。
+#
+# 构建:  docker build -f Dockerfile.server -t code-review-agent:latest .
+# 运行:  docker run -p 8080:8080 -v cra-data:/data code-review-agent:latest
+# 或直接: docker compose up -d
+
+# ---------- 构建阶段（CGO：go-sqlite3 需要 gcc/musl） ----------
+FROM golang:1.23-alpine AS builder
+RUN apk add --no-cache git gcc musl-dev
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ENV GOFLAGS=-buildvcs=false
+RUN CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o /out/code-review-agent .
+
+# ---------- 运行阶段（与 builder 同为 alpine/musl，动态链接兼容） ----------
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates git tzdata wget
+
+COPY --from=builder /out/code-review-agent /usr/local/bin/code-review-agent
+
+# 数据卷：SQLite 数据库 + 报告/审计产物
+VOLUME ["/data"]
+WORKDIR /data
+EXPOSE 8080
+
+ENTRYPOINT ["code-review-agent"]
+CMD ["serve", "--port", "8080", "--db", "/data/review.db", "--data-dir", "/data/reports"]

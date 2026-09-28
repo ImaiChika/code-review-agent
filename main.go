@@ -167,6 +167,14 @@ func runServe(args []string) {
 	allowRepos := fs.String("allow-repo", "", "仓库路径白名单前缀（M7-F4；逗号分隔多个，如 /home/work/repos,/opt/projects；空 = 不限制。公网部署强烈建议配置）")
 	fs.Parse(args)
 
+	// M7-F7：容器部署用环境变量注入（flag 显式设置优先）
+	if *authToken == "" {
+		*authToken = os.Getenv("AUTH_TOKEN")
+	}
+	if *allowRepos == "" {
+		*allowRepos = os.Getenv("ALLOW_REPOS")
+	}
+
 	allowedRepos := []string{}
 	for _, p := range strings.Split(*allowRepos, ",") {
 		if p = strings.TrimSpace(p); p != "" {

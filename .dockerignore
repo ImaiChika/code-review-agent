@@ -1,0 +1,16 @@
+# 构建上下文瘦身：只保留 Go 源码与构建必需文件
+.git
+.claude
+.run
+runs
+out
+work
+Users
+官方资料
+*.db
+*.log
+*.diff
+review_report.*
+tool_safety_audit.jsonl
+.dataset
+code-review-agent
