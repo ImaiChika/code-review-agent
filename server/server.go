@@ -577,51 +577,36 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 每个任务的风险评分在报告 JSON 里，取最近任务汇总
-	tasks, err := s.store.ListTasks(200)
+	// M7-F5（修 P2-11）：趋势走 SQL 聚合——total/avg/max 全量准确，
+	// 不再逐个解析报告 JSON（O(N) → O(1)），recent 直接读任务表冗余列
+	trend, err := s.store.GetTrendStats()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var recent []map[string]any
-	var sum, max float64
-	counted := 0
-	for _, t := range tasks {
-		jsonReport, _, err := s.store.GetReport(t.TaskID)
-		if err != nil {
-			continue
-		}
-		var rep report.ReviewReport
-		if json.Unmarshal([]byte(jsonReport), &rep) != nil {
-			continue
-		}
-		sum += rep.Monitor.RiskScore
-		counted++
-		if rep.Monitor.RiskScore > max {
-			max = rep.Monitor.RiskScore
-		}
-		if len(recent) < 10 {
-			recent = append(recent, map[string]any{
-				"task_id":    t.TaskID,
-				"input_path": t.InputPath,
-				"started_at": t.StartedAt,
-				"risk_score": rep.Monitor.RiskScore,
-				"risk_grade": rep.Monitor.RiskGrade,
-			})
-		}
+
+	recent := make([]map[string]any, 0, len(trend.Recent))
+	for _, t := range trend.Recent {
+		recent = append(recent, map[string]any{
+			"task_id":    t.TaskID,
+			"input_path": t.InputPath,
+			"started_at": t.StartedAt,
+			"risk_score": t.RiskScore,
+			"risk_grade": t.RiskGrade,
+		})
 	}
 
-	var avg float64
-	if counted > 0 {
-		avg = sum / float64(counted)
+	if trend.Daily == nil {
+		trend.Daily = []storage.TrendDay{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"finding_stats": stats,
-		"total_tasks":   len(tasks),
-		"avg_risk":      avg,
-		"max_risk":      max,
+		"total_tasks":   trend.TotalTasks,
+		"avg_risk":      trend.AvgRisk,
+		"max_risk":      trend.MaxRisk,
 		"recent_risks":  recent,
+		"trend_daily":   trend.Daily,
 	})
 }
 

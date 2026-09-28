@@ -449,7 +449,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		}
 		defer store.Close()
 
-		// 保存任务
+		// 保存任务（M7-F5：风险分冗余进任务行，趋势看板免解析报告 JSON）
 		task := &storage.ReviewTask{
 			TaskID:       taskID,
 			Status:       storage.TaskStatusCompleted,
@@ -458,6 +458,8 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			FilesCount:   len(files),
 			GoFilesCount: len(goFiles),
 			StartedAt:    start,
+			RiskScore:    reviewReport.Monitor.RiskScore,
+			RiskGrade:    reviewReport.Monitor.RiskGrade,
 		}
 		if err := store.CreateTask(task); err != nil {
 			return nil, fmt.Errorf("保存任务失败: %w", err)

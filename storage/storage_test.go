@@ -6,6 +6,8 @@
 package storage
 
 import (
+	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -362,5 +364,105 @@ func TestCreateFailedTask(t *testing.T) {
 	}
 	if got.Duration == "" {
 		t.Error("duration 应被填充")
+	}
+}
+
+// TestGetTrendStats M7-F5：趋势聚合（全量 count/avg/max + 按天 + recent）。
+func TestGetTrendStats(t *testing.T) {
+	store := newTestStore(t)
+
+	// 3 个任务：两个今天（风险 30/90），一个老任务（11 个月前，不应进 30 天窗口但计入全量）
+	old := time.Now().Add(-330 * 24 * time.Hour)
+	mk := func(id string, score float64, grade string, started time.Time) {
+		task := &ReviewTask{
+			TaskID: id, Status: TaskStatusCompleted, InputType: "diff_content",
+			InputPath: id, StartedAt: started, RiskScore: score, RiskGrade: grade,
+		}
+		if err := store.CreateTask(task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", id, err)
+		}
+	}
+	mk("task-trend-a", 30, "B", time.Now())
+	mk("task-trend-b", 90, "F", time.Now())
+	mk("task-trend-old", 10, "A", old)
+
+	ts, err := store.GetTrendStats()
+	if err != nil {
+		t.Fatalf("GetTrendStats: %v", err)
+	}
+	if ts.TotalTasks != 3 {
+		t.Errorf("TotalTasks = %d, 期望 3（全量，非截断）", ts.TotalTasks)
+	}
+	wantAvg := (30 + 90 + 10) / 3.0
+	if ts.AvgRisk < wantAvg-0.01 || ts.AvgRisk > wantAvg+0.01 {
+		t.Errorf("AvgRisk = %.2f, 期望 %.2f", ts.AvgRisk, wantAvg)
+	}
+	if ts.MaxRisk != 90 {
+		t.Errorf("MaxRisk = %.0f, 期望 90", ts.MaxRisk)
+	}
+	// 30 天窗口只含今天的 2 个任务
+	if len(ts.Daily) != 1 || ts.Daily[0].Tasks != 2 {
+		t.Errorf("Daily = %+v, 期望 1 天 2 任务（老任务在窗口外）", ts.Daily)
+	}
+	if n := ts.Daily[0].AvgRisk; n < 59.9 || n > 60.1 {
+		t.Errorf("当日 AvgRisk = %.1f, 期望 60", n)
+	}
+	// Recent 最近 10 个
+	if len(ts.Recent) != 3 {
+		t.Errorf("Recent = %d 条, 期望 3", len(ts.Recent))
+	}
+}
+
+// TestMigrateColumns_OldSchema M7-F5：旧 schema（无 risk 列）打开时自动补列。
+func TestMigrateColumns_OldSchema(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "old.db")
+
+	// 手工建一个 v1.0 旧 schema 的库 + 一行数据
+	oldDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = oldDB.Exec(`CREATE TABLE cr_review_tasks (
+		task_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+		input_type TEXT NOT NULL, input_path TEXT NOT NULL,
+		files_count INTEGER DEFAULT 0, go_files_count INTEGER DEFAULT 0,
+		started_at DATETIME NOT NULL, completed_at DATETIME,
+		duration TEXT, error_msg TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = oldDB.Exec(`INSERT INTO cr_review_tasks
+		(task_id, status, input_type, input_path, started_at)
+		VALUES ('task-old-1', 'completed', 'diff_file', 'x.diff', '2026-09-01 10:00:00')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldDB.Close()
+
+	// 新版本打开：迁移应自动补列且旧数据可读
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("打开旧库失败: %v", err)
+	}
+	defer store.Close()
+
+	task, err := store.GetTask("task-old-1")
+	if err != nil {
+		t.Fatalf("迁移后旧任务不可读: %v", err)
+	}
+	if task.RiskScore != 0 || task.RiskGrade != "" {
+		t.Errorf("旧数据 risk 默认值应为 0/空, 得到 %.1f/%q", task.RiskScore, task.RiskGrade)
+	}
+
+	// 迁移后可写入新列
+	nt := &ReviewTask{TaskID: "task-new-2", Status: TaskStatusCompleted, InputType: "diff_content",
+		InputPath: "y.diff", StartedAt: time.Now(), RiskScore: 55, RiskGrade: "C"}
+	if err := store.CreateTask(nt); err != nil {
+		t.Fatalf("迁移后写任务失败: %v", err)
+	}
+	got, _ := store.GetTask("task-new-2")
+	if got.RiskScore != 55 || got.RiskGrade != "C" {
+		t.Errorf("迁移后新数据 risk 读写不符: %.1f/%q", got.RiskScore, got.RiskGrade)
 	}
 }

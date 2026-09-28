@@ -184,6 +184,8 @@ async function viewDashboard() {
     </div>
 
     <div class="grid grid-2">
+      ${panel("近 30 天趋势", trendSVG(stats.trend_daily),
+        "柱 = 每天审查任务数；橙色点线 = 当天平均风险分。数据来自任务表 SQL 聚合")}
       ${panel("严重度分布", sevRows)}
       ${panel("问题分类", catRows)}
       ${panel("规则命中排行", `<table class="t"><thead><tr><th>#</th><th>RULE ID</th><th style="text-align:right">命中</th></tr></thead><tbody>${ruleRows}</tbody></table>`)}
@@ -201,6 +203,48 @@ function hbar(label, n, max, color, isText) {
     <div class="hbar-label">${esc(label)}</div>
     <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(pct, 1.5)}%;background:${color}"></div></div>
     <div class="hbar-num">${isText ? esc(n) : n}</div>
+  </div>`;
+}
+
+/* 近 30 天趋势 SVG：柱 = 任务数（左轴自动缩放），点线 = 平均风险分（0-100 右轴） */
+function trendSVG(daily) {
+  if (!daily || !daily.length) return `<div class="empty">暂无数据</div>`;
+  const W = 620, H = 150, PL = 30, PR = 34, PT = 14, PB = 22;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const maxTasks = Math.max(1, ...daily.map(d => d.tasks));
+  const bw = Math.min(24, iw / daily.length * 0.6);
+  const step = iw / daily.length;
+  const x = i => PL + step * i + step / 2;
+
+  let bars = "", dots = "", labels = "";
+  daily.forEach((d, i) => {
+    const h = d.tasks / maxTasks * (ih - 8);
+    bars += `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${(PT + ih - h).toFixed(1)}"
+      width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent)" opacity="0.35">
+      </rect>`;
+    const cy = PT + ih - (d.avg_risk / 100) * ih;
+    dots += `<circle cx="${x(i).toFixed(1)}" cy="${cy.toFixed(1)}" r="2.6" fill="var(--orange)"></circle>`;
+    if (i > 0) {
+      const px = x(i - 1), py = PT + ih - (daily[i - 1].avg_risk / 100) * ih;
+      dots += `<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${cy.toFixed(1)}"
+        stroke="var(--orange)" stroke-width="1.4" opacity="0.8"></line>`;
+    }
+    if (daily.length <= 10 || i % Math.ceil(daily.length / 8) === 0 || i === daily.length - 1) {
+      labels += `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="9" fill="var(--ink-dim)"
+        text-anchor="middle">${d.date.slice(5)}</text>`;
+    }
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
+    <line x1="${PL}" y1="${PT + ih}" x2="${W - PR}" y2="${PT + ih}" stroke="var(--line)"></line>
+    <text x="${PL - 6}" y="${PT + 8}" font-size="9" fill="var(--ink-dim)" text-anchor="end">${maxTasks}</text>
+    <text x="${PL - 6}" y="${PT + ih + 3}" font-size="9" fill="var(--ink-dim)" text-anchor="end">0</text>
+    <text x="${W - PR + 6}" y="${PT + 8}" font-size="9" fill="var(--orange)">100</text>
+    ${bars}${dots}${labels}
+  </svg>
+  <div style="display:flex;gap:16px;margin-top:6px;font-size:11px;color:var(--ink-dim)">
+    <span><span style="display:inline-block;width:8px;height:8px;background:var(--accent);opacity:.45;border-radius:2px"></span> 任务数（峰值 ${maxTasks}/天）</span>
+    <span><span style="display:inline-block;width:8px;height:2px;background:var(--orange);vertical-align:middle"></span> 平均风险分（0-100）</span>
   </div>`;
 }
 

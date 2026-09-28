@@ -56,6 +56,7 @@ type Store interface {
 
 	// 聚合统计
 	GetFindingStats() (*FindingStats, error)
+	GetTrendStats() (*TrendStats, error)
 
 	// 生命周期
 	Close() error
@@ -85,6 +86,24 @@ type ReviewTask struct {
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	Duration     string     `json:"duration,omitempty"`
 	ErrorMsg     string     `json:"error_msg,omitempty"`
+	RiskScore    float64    `json:"risk_score,omitempty"` // M7-F5：风险分冗余（趋势聚合用，免解析报告 JSON）
+	RiskGrade    string     `json:"risk_grade,omitempty"` // M7-F5：A-F 等级
+}
+
+// TrendDay 单天的趋势数据（M7-F5）。
+type TrendDay struct {
+	Date    string  `json:"date"`     // YYYY-MM-DD
+	Tasks   int     `json:"tasks"`    // 当天任务数
+	AvgRisk float64 `json:"avg_risk"` // 当天平均风险分
+}
+
+// TrendStats 趋势聚合（M7-F5，纯 SQL 聚合，任务数无关的 O(1) 响应）。
+type TrendStats struct {
+	TotalTasks int           `json:"total_tasks"` // 全量任务数（替代旧 stats 的"最近 200 条"失真值）
+	AvgRisk    float64       `json:"avg_risk"`    // 全量平均风险分
+	MaxRisk    float64       `json:"max_risk"`    // 全量最高风险分
+	Daily      []TrendDay    `json:"daily"`       // 最近 30 天按天聚合
+	Recent     []*ReviewTask `json:"recent"`      // 最近 10 个任务（含风险分）
 }
 
 // SandboxRun 表示一次沙箱执行记录。
@@ -261,6 +280,43 @@ func (s *SQLiteStore) initTables() error {
 		}
 	}
 
+	// M7-F5：列迁移——旧库文件升级时补 risk_score / risk_grade（SQLite 无 ADD COLUMN IF NOT EXISTS）
+	if err := s.migrateColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateColumns 幂等列迁移：检查 cr_review_tasks 缺失的列并补齐。
+func (s *SQLiteStore) migrateColumns() error {
+	existing := map[string]bool{}
+	rows, err := s.db.Query(`PRAGMA table_info(cr_review_tasks)`)
+	if err != nil {
+		return fmt.Errorf("检查表结构失败: %w", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err == nil {
+			existing[name] = true
+		}
+	}
+	rows.Close()
+
+	migrations := []struct{ col, ddl string }{
+		{"risk_score", `ALTER TABLE cr_review_tasks ADD COLUMN risk_score REAL DEFAULT 0`},
+		{"risk_grade", `ALTER TABLE cr_review_tasks ADD COLUMN risk_grade TEXT DEFAULT ''`},
+	}
+	for _, m := range migrations {
+		if existing[m.col] {
+			continue
+		}
+		if _, err := s.db.Exec(m.ddl); err != nil {
+			return fmt.Errorf("迁移列 %s 失败: %w", m.col, err)
+		}
+	}
 	return nil
 }
 
@@ -280,10 +336,10 @@ func (s *SQLiteStore) Close() error {
 // CreateTask 创建一个新的审查任务。
 func (s *SQLiteStore) CreateTask(task *ReviewTask) error {
 	_, err := s.db.Exec(
-		`INSERT INTO cr_review_tasks (task_id, status, input_type, input_path, files_count, go_files_count, started_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO cr_review_tasks (task_id, status, input_type, input_path, files_count, go_files_count, started_at, risk_score, risk_grade)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskID, task.Status, task.InputType, task.InputPath,
-		task.FilesCount, task.GoFilesCount, task.StartedAt,
+		task.FilesCount, task.GoFilesCount, task.StartedAt, task.RiskScore, task.RiskGrade,
 	)
 	return err
 }
@@ -309,17 +365,18 @@ func (s *SQLiteStore) CreateFailedTask(task *ReviewTask, errMsg string) error {
 func (s *SQLiteStore) GetTask(taskID string) (*ReviewTask, error) {
 	row := s.db.QueryRow(
 		`SELECT task_id, status, input_type, input_path, files_count, go_files_count,
-		        started_at, completed_at, duration, error_msg
+		        started_at, completed_at, duration, error_msg, risk_score, risk_grade
 		 FROM cr_review_tasks WHERE task_id = ?`, taskID,
 	)
 
 	var task ReviewTask
 	var completedAt sql.NullTime
-	var duration, errorMsg sql.NullString
+	var duration, errorMsg, riskGrade sql.NullString
+	var riskScore sql.NullFloat64
 	err := row.Scan(
 		&task.TaskID, &task.Status, &task.InputType, &task.InputPath,
 		&task.FilesCount, &task.GoFilesCount,
-		&task.StartedAt, &completedAt, &duration, &errorMsg,
+		&task.StartedAt, &completedAt, &duration, &errorMsg, &riskScore, &riskGrade,
 	)
 	if err != nil {
 		return nil, err
@@ -332,6 +389,12 @@ func (s *SQLiteStore) GetTask(taskID string) (*ReviewTask, error) {
 	}
 	if errorMsg.Valid {
 		task.ErrorMsg = errorMsg.String
+	}
+	if riskScore.Valid {
+		task.RiskScore = riskScore.Float64
+	}
+	if riskGrade.Valid {
+		task.RiskGrade = riskGrade.String
 	}
 	return &task, nil
 }
@@ -361,7 +424,7 @@ func (s *SQLiteStore) UpdateTaskStatus(taskID string, status TaskStatus) error {
 func (s *SQLiteStore) ListTasks(limit int) ([]*ReviewTask, error) {
 	rows, err := s.db.Query(
 		`SELECT task_id, status, input_type, input_path, files_count, go_files_count,
-		        started_at, completed_at, duration, error_msg
+		        started_at, completed_at, duration, error_msg, risk_score, risk_grade
 		 FROM cr_review_tasks ORDER BY started_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -373,11 +436,12 @@ func (s *SQLiteStore) ListTasks(limit int) ([]*ReviewTask, error) {
 	for rows.Next() {
 		var task ReviewTask
 		var completedAt sql.NullTime
-		var duration, errorMsg sql.NullString
+		var duration, errorMsg, riskGrade sql.NullString
+		var riskScore sql.NullFloat64
 		err := rows.Scan(
 			&task.TaskID, &task.Status, &task.InputType, &task.InputPath,
 			&task.FilesCount, &task.GoFilesCount,
-			&task.StartedAt, &completedAt, &duration, &errorMsg,
+			&task.StartedAt, &completedAt, &duration, &errorMsg, &riskScore, &riskGrade,
 		)
 		if err != nil {
 			return nil, err
@@ -390,6 +454,12 @@ func (s *SQLiteStore) ListTasks(limit int) ([]*ReviewTask, error) {
 		}
 		if errorMsg.Valid {
 			task.ErrorMsg = errorMsg.String
+		}
+		if riskScore.Valid {
+			task.RiskScore = riskScore.Float64
+		}
+		if riskGrade.Valid {
+			task.RiskGrade = riskGrade.String
 		}
 		tasks = append(tasks, &task)
 	}
@@ -718,5 +788,62 @@ func (s *SQLiteStore) GetFindingStats() (*FindingStats, error) {
 		stats.TopRules = append(stats.TopRules, rc)
 	}
 
+	return stats, nil
+}
+
+// GetTrendStats 趋势聚合（M7-F5）：全量任务数/均分/最高分 + 最近 30 天按天聚合
+// + 最近 10 个任务（风险分直接读任务表冗余列，不再逐个解析报告 JSON）。
+func (s *SQLiteStore) GetTrendStats() (*TrendStats, error) {
+	stats := &TrendStats{}
+
+	// 全量聚合（修 P2-11：total_tasks 不再被 LIMIT 200 截断）
+	var avg, maxRisk sql.NullFloat64
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*), AVG(risk_score), MAX(risk_score) FROM cr_review_tasks`,
+	).Scan(&stats.TotalTasks, &avg, &maxRisk); err != nil {
+		return nil, fmt.Errorf("聚合任务统计失败: %w", err)
+	}
+	if avg.Valid {
+		stats.AvgRisk = avg.Float64
+	}
+	if maxRisk.Valid {
+		stats.MaxRisk = maxRisk.Float64
+	}
+
+	// 最近 30 天按天聚合。
+	// 用 substr(started_at,1,10) 取"写入时的本地日期"而非 date()——
+	// Go driver 存的 RFC3339 带 +08:00 时区，date() 会折算成 UTC 日期，
+	// 凌晨任务会整体漂移到"昨天"；substr 与 naive 本地字符串语义一致。
+	rows, err := s.db.Query(
+		`SELECT substr(started_at, 1, 10) AS day, COUNT(*), AVG(risk_score)
+		 FROM cr_review_tasks
+		 WHERE substr(started_at, 1, 10) >= date('now', 'localtime', '-29 days')
+		 GROUP BY day ORDER BY day`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("聚合每日趋势失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day TrendDay
+		var avgDay sql.NullFloat64
+		if err := rows.Scan(&day.Date, &day.Tasks, &avgDay); err != nil {
+			return nil, err
+		}
+		if avgDay.Valid {
+			day.AvgRisk = avgDay.Float64
+		}
+		stats.Daily = append(stats.Daily, day)
+	}
+
+	// 最近 10 个任务
+	recent, err := s.ListTasks(10)
+	if err != nil {
+		return nil, err
+	}
+	stats.Recent = recent
+	if stats.Recent == nil {
+		stats.Recent = []*ReviewTask{}
+	}
 	return stats, nil
 }

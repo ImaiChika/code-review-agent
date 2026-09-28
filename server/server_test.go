@@ -18,6 +18,7 @@ import (
 
 	"code-review-agent/report"
 	"code-review-agent/review"
+	"code-review-agent/storage"
 )
 
 // newTestServer 启动一个完整的测试服务（真实 SQLite + 内嵌前端 + 真实审查管线）。
@@ -583,4 +584,53 @@ func TestAsyncQueue_SubmitNotBlockedByRunningJob(t *testing.T) {
 	close(release)
 	waitTaskDone(t, ts, sub1["task_id"].(string))
 	waitTaskDone(t, ts, sub2["task_id"].(string))
+}
+
+// TestStats_TotalAccurate_Beyond200 M7-F5（修 P2-11）：
+// 超过 200 个任务后 total_tasks 仍准确（SQL COUNT 全量），且 stats 响应含每日趋势。
+func TestStats_TotalAccurate_Beyond200(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(Config{
+		Port: 0, DBPath: filepath.Join(tmp, "review.db"), DataDir: filepath.Join(tmp, "data"),
+		SampleDir: "../testdata", SandboxMode: "off",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(func() { ts.Close(); _ = s.Close() })
+
+	// 直接造 250 条任务行（有报告的任务 1 条，其余仅任务行——聚合不依赖报告 JSON）
+	seedTask, _ := json.Marshal(map[string]any{"diff_content": sampleSecretDiff})
+	sub := submitReview(t, ts, string(seedTask))
+	waitTaskDone(t, ts, sub["task_id"].(string))
+	for i := 0; i < 249; i++ {
+		if err := s.store.CreateTask(&storage.ReviewTask{
+			TaskID:    fmt.Sprintf("task-seed-%04d", i),
+			Status:    "completed",
+			InputType: "diff_content",
+			InputPath: "seed",
+			StartedAt: time.Now(),
+			RiskScore: float64(i % 100),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, _ := http.Get(ts.URL + "/api/stats")
+	var stats map[string]any
+	json.NewDecoder(res.Body).Decode(&stats)
+	res.Body.Close()
+
+	if got := stats["total_tasks"].(float64); got != 250 {
+		t.Errorf("total_tasks = %.0f, 期望 250（全量 COUNT，非 200 截断）", got)
+	}
+	daily, _ := stats["trend_daily"].([]any)
+	if len(daily) == 0 {
+		t.Error("trend_daily 不应为空（今天有任务）")
+	}
+	day, _ := daily[len(daily)-1].(map[string]any)
+	if day["tasks"].(float64) < 250 {
+		t.Errorf("当日任务数 = %v, 期望 ≥ 250", day["tasks"])
+	}
 }
