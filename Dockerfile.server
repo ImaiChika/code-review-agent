@@ -25,10 +25,13 @@ RUN apk add --no-cache ca-certificates git tzdata wget
 
 COPY --from=builder /out/code-review-agent /usr/local/bin/code-review-agent
 
+# M7-F7+：示例 diff 随镜像分发——Docker 部署与本地 sh 部署一样有"一键实例演示"
+COPY --from=builder /src/testdata /app/testdata
+
 # 数据卷：SQLite 数据库 + 报告/审计产物
 VOLUME ["/data"]
 WORKDIR /data
 EXPOSE 8080
 
 ENTRYPOINT ["code-review-agent"]
-CMD ["serve", "--port", "8080", "--db", "/data/review.db", "--data-dir", "/data/reports"]
+CMD ["serve", "--port", "8080", "--db", "/data/review.db", "--data-dir", "/data/reports", "--sample-dir", "/app/testdata"]

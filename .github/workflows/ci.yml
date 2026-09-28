@@ -129,6 +129,10 @@ jobs:
           done
           curl -sf http://localhost:8080/api/health
           echo
+          # 示例 diff 随镜像分发：与本地 sh 部署同一体验（M7-F7+）
+          samples=$(curl -sf http://localhost:8080/api/samples | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
+          echo "容器内示例数: $samples"
+          test "$samples" -ge 8
           # 无 token 写操作应 401；带 token 应 202
           code1=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/reviews \
             -H 'Content-Type: application/json' -d '{"diff_content":""}')

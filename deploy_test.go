@@ -38,6 +38,8 @@ func TestDeployAssets(t *testing.T) {
 		{"CGO 构建（go-sqlite3 依赖）", "Dockerfile.server", "CGO_ENABLED=1"},
 		{"数据卷挂点", "Dockerfile.server", "VOLUME"},
 		{"默认 serve 端口与 compose 一致", "Dockerfile.server", `["serve", "--port", "8080"`},
+		{"示例随镜像分发（两种部署同一体验）", "Dockerfile.server", "COPY --from=builder /src/testdata"},
+		{"sample-dir 指向镜像内路径", "Dockerfile.server", `"--sample-dir", "/app/testdata"`},
 		{"compose 引用服务 Dockerfile", "docker-compose.yml", "Dockerfile.server"},
 		{"compose 暴露 8080", "docker-compose.yml", "8080:8080"},
 		{"compose 数据卷", "docker-compose.yml", "cra-data:/data"},

@@ -1,4 +1,5 @@
 # 构建上下文瘦身：只保留 Go 源码与构建必需文件
+# 注意：testdata/ 必须保留（随镜像分发的前端示例 diff，见 Dockerfile.server）
 .git
 .claude
 .run
@@ -7,6 +8,7 @@ out
 work
 Users
 官方资料
+dataset
 *.db
 *.log
 *.diff
