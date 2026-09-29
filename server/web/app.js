@@ -410,8 +410,19 @@ async function viewReview() {
     const hint = document.getElementById("llm-ready-hint");
     if (hint) hint.textContent = st.llm.ready ? "✓ 已就绪" : "（未配置：到「智能与配置 → 模型与密钥」设置后可用）";
     const sel = document.getElementById("sel-sandbox");
-    if (sel && st.e2b.key_set) {
-      sel.querySelector("option[value=e2b]").disabled = false;
+    if (sel) {
+      // 选项文字按实际配置状态渲染——只改 disabled 不改文字的话，
+      // 配好了还挂着"未配置 Key"的旧标签（用户会被误导）
+      const opt = sel.querySelector("option[value=e2b]");
+      if (opt) {
+        if (st.e2b.key_set) {
+          opt.disabled = false;
+          opt.textContent = `E2B 云沙箱（已就绪，尾号 ${st.e2b.key_hint.slice(-4)}）`;
+        } else {
+          opt.disabled = true;
+          opt.textContent = "E2B 云沙箱（未配置 Key）";
+        }
+      }
     }
   } catch { /* 设置读取失败不阻塞审查表单 */ }
 }
