@@ -609,7 +609,7 @@ rules:
 >
 > **✅ M7 退出标准验收（2026-09-29，逐项）**：① 两个用户同时提交审查不互相阻塞 ✅（F1：异步队列，并发提交实测 1ms 级 202 + 各自轮询进度）；② 无 token 无法写操作 ✅（F2：401 constant-time，读公开）；③ 公网暴露面收敛 ✅（F4 白名单封 repo_path + F2 认证 + F2/F3 请求体上限与限流；四种免挂载输入入口）；④ `docker compose up` 5 分钟首次审查 ✅/⏳（文件与 env 契约就绪并有静态测试锁死，**镜像构建+容器实机验证在 CI `server-image` job 推送后实跑**——本机 Docker daemon 未运行，同 M3 处理方式）；⑤ 全量测试与数据集门禁不回退 ✅（13 包 `-race` 全绿 + 39 样本 100%/100%/0%）。**M7 全部 8 任务完成**。CI 已实跑全绿（run 36455266897：13 包 -race + 数据集门禁 + **服务镜像 Docker 实机验证通过**——构建/健康检查/认证 401/202/卷持久化 + 沙箱 staticcheck 实机），**tag `v1.1.0` 已打并推送**（附注说明 M7 内容与待验证项：真 LLM 对照留 M8）。
 
-#### M8 · 智能化增强（v1.2，2026-10-22 → 11-11，约 24h）
+#### M8 · 智能化增强（v1.2，2026-10-22 → 11-11，约 24h）▶ 执行中（2026-09-29 起，每完成一项在下方登记）
 
 > 用户目标：**更强智能化、自动检测、少动手**。三条线：LLM 深度介入（建议生成）、语义层升级（从"词法猜"到"类型知道"）、个性化降噪（记住人的判断）。
 
@@ -661,7 +661,7 @@ rules:
 |---|--------|------|--------|
 | C1 | **LLM 复核降噪**（最推荐） | 规则引擎产出候选 findings → LLM 逐条复核（"这是真问题吗"）→ 调 confidence。规则保证召回，LLM 保证精度，直接回应"误报率 ≤ 15%"。模型选 `model/openai` 或本地 `model/ollama` | L |
 | C2 | **fake model 模式** | 引入框架 `test` 子模块的 `QueueModel`（Push 预设回复按序回放）实现 `--fake-model`，无 API Key 全链路可测可复现（官方硬要求） | S |
-| C3 | LLM 修复建议生成 | 对每条 finding 让 LLM 生成带上下文 patch 的修复建议，替代静态 recommendation 文案 | M |
+| C3 | LLM 修复建议生成 ✅（2026-09-29，随 --llm 启用） | 对复核确认保留的 finding 生成针对性修复建议替换静态文案；prompt 要求每条独立完整（禁"同上"引用，建议逐条独立展示）；协议 `序号. 建议行`（单行防注入），缺失/失败保守保留原建议；替换文本过统一 Redactor；`--fake-model` 建议轮默认空响应（静态建议保留、确定性），显式 Push 两段响应可复现替换；`Monitor.llm_suggested` 计数 | M |
 | C4 | Agent 化编排 | `llmagent.New("reviewer", llmagent.WithModel(m), llmagent.WithTools(reviewTools))` + `runner.NewRunner("code-review", agent)`；把"解析/规则/沙箱/评分"注册成 FunctionTool | L |
 | C5 | GraphAgent 流水线 | `graph/` StateGraph 编排：parse → rules → sandbox → LLM 复核 → scoring → report；`ask` 决策挂 **interrupt/resume** 人工审批后继续——这是框架 checkpoint/interrupt 的教科书场景 | L |
 | C6 | **包成 MCP server** | 让 Claude Code / Cursor 等 MCP 客户端直接调 `code_review` 工具审查当前 diff；框架 `server/` 有 MCP 服务端支持 | M |

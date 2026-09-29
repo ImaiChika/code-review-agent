@@ -399,3 +399,61 @@ func TestRun_FileContents(t *testing.T) {
 		t.Error("粘贴代码中的硬编码密钥应被 SEC-AST-001 检出")
 	}
 }
+
+// TestRun_FakeModelSuggestions M8-C3 管线级：复核轮 + 建议轮两段响应，
+// LLM 建议替换静态 recommendation 且脱敏兜底生效、Monitor 计数正确。
+func TestRun_FakeModelSuggestions(t *testing.T) {
+	outDir := t.TempDir()
+	rep, err := Run(Options{
+		DiffFile:    "../testdata/security_issue.diff",
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+		LLMMode:     "fake",
+		LLMFakeResponses: []string{
+			"1. CONFIRM: ok\n2. CONFIRM: ok\n", // 复核轮：全确认（样本产出 2 条）
+			"1. 用 os.Getenv 注入密钥并接入密钥管理服务，轮换已泄漏的 key\n2. 改用环境变量读取并轮换凭据，密钥管理服务统一托管\n", // 建议轮
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	if rep.Monitor.LLMSuggested != len(rep.Findings) {
+		t.Errorf("LLMSuggested = %d, findings = %d（两条都应被替换）",
+			rep.Monitor.LLMSuggested, len(rep.Findings))
+	}
+	for _, f := range rep.Findings {
+		// 静态原文案是「使用环境变量或密钥管理服务」——替换后应指向轮换凭据
+		if !strings.Contains(f.Recommendation, "轮换") {
+			t.Errorf("finding %s 建议应被 LLM 文案替换: %q", f.RuleID, f.Recommendation)
+		}
+		if strings.Contains(f.Recommendation, "sk-") {
+			t.Errorf("建议不应含明文密钥: %q", f.Recommendation)
+		}
+	}
+}
+
+// TestRun_FakeModelSuggestionRoundDefault M8-C3：只给复核轮响应（建议轮空队列
+// 默认回放空响应）→ 静态建议保留、LLMSuggested=0，recall 不降。
+func TestRun_FakeModelSuggestionRoundDefault(t *testing.T) {
+	outDir := t.TempDir()
+	rep, err := Run(Options{
+		DiffFile:    "../testdata/security_issue.diff",
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+		LLMMode:     "fake",
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	if rep.Monitor.LLMSuggested != 0 {
+		t.Errorf("默认建议轮应无建议, LLMSuggested = %d", rep.Monitor.LLMSuggested)
+	}
+	if len(rep.Findings) == 0 {
+		t.Error("recall 不应下降")
+	}
+	for _, f := range rep.Findings {
+		if f.Recommendation == "" {
+			t.Errorf("finding %s 应保留静态建议", f.RuleID)
+		}
+	}
+}

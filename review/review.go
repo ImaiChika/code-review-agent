@@ -311,10 +311,11 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	// ========== Step 4.5: LLM 复核降噪（M4-C1/C2，默认关闭） ==========
 	// 注：报告对象在 Step 6 才创建，复核统计先存局部变量
 	var llmMode string
-	var llmReviewed, llmDropped int
+	var llmReviewed, llmDropped, llmSuggested int
 	if opts.LLMMode != "" {
 		llmMode = opts.LLMMode
-		if mdl, merr := buildLLMModel(opts); merr != nil {
+		mdl, merr := buildLLMModel(opts)
+		if merr != nil {
 			log.Printf("⚠️ LLM 复核未启用: %v", merr)
 		} else {
 			kept, stats := llmreview.Review(ctx, mdl, dedupResult.Findings)
@@ -325,6 +326,23 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			}
 			if opts.Verbose {
 				fmt.Printf("🤖 LLM 复核: 送审 %d, 剔除 %d\n", stats.Reviewed, stats.Dropped)
+			}
+
+			// ========== Step 4.6: LLM 修复建议（M8-C3，随 --llm 启用） ==========
+			// 对复核确认保留的问题生成针对性建议，替换静态 recommendation；
+			// 缺失/失败保守保留原建议（与复核同一"增强不是依赖"纪律）。
+			suggestions, sstats := llmreview.Suggest(ctx, mdl, dedupResult.Findings)
+			for i, text := range suggestions {
+				if i >= 0 && i < len(dedupResult.Findings) && text != "" {
+					dedupResult.Findings[i].Recommendation = safety.MaskSensitiveInfo(text)
+					llmSuggested++
+				}
+			}
+			if sstats.Error != "" {
+				log.Printf("⚠️ LLM 建议生成失败（保留静态建议）: %s", sstats.Error)
+			}
+			if opts.Verbose {
+				fmt.Printf("💡 LLM 建议: 生成 %d/%d\n", llmSuggested, len(dedupResult.Findings))
 			}
 		}
 	}
@@ -366,6 +384,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport.Monitor.LLMMode = llmMode
 	reviewReport.Monitor.LLMReviewed = llmReviewed
 	reviewReport.Monitor.LLMDropped = llmDropped
+	reviewReport.Monitor.LLMSuggested = llmSuggested // M8-C3
 	reviewReport.Monitor.RiskScore = riskScore.Score
 	reviewReport.Monitor.RiskGrade = riskScore.Grade
 	reviewReport.Monitor.RiskBreakdown = riskScore.Breakdown // M7-F6：HTML 报告六维图

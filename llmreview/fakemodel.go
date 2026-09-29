@@ -66,8 +66,10 @@ func confirmAllText(n int) string {
 // GenerateContent 按序回放一条预设响应。
 //
 // 队列为空时的默认行为（--fake-model 自包含语义，M4-C2）：
-// 从请求 prompt 中解析候选数量，回放"全部 CONFIRM"的确定性判定——
-// 用于验证"LLM 开启后 recall 不降"；剔除机制用显式 Push 的响应测试。
+//   - 复核轮（prompt 含 CONFIRM 指令）：回放"全部 CONFIRM"的确定性判定——
+//     用于验证"LLM 开启后 recall 不降"；剔除机制用显式 Push 的响应测试。
+//   - 建议轮（M8-C3，prompt 含修复顾问标记）：回放空响应——静态建议全部保留
+//     （空响应解析不出建议行），确定性且不引入伪建议；替换机制用显式 Push 测试。
 func (m *FakeModel) GenerateContent(ctx context.Context, request *model.Request) (<-chan *model.Response, error) {
 	if request == nil {
 		return nil, errors.New("fake model: request is nil")
@@ -75,10 +77,14 @@ func (m *FakeModel) GenerateContent(ctx context.Context, request *model.Request)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.consumed >= len(m.queued) {
+		content := confirmAllText(countCandidates(request))
+		if isSuggestionRound(request) {
+			content = "" // 建议轮默认无建议 → 保留静态建议
+		}
 		resp := &model.Response{
 			Choices: []model.Choice{{
 				Index:   0,
-				Message: model.Message{Role: model.RoleAssistant, Content: confirmAllText(countCandidates(request))},
+				Message: model.Message{Role: model.RoleAssistant, Content: content},
 			}},
 		}
 		ch := make(chan *model.Response, 1)
@@ -93,6 +99,17 @@ func (m *FakeModel) GenerateContent(ctx context.Context, request *model.Request)
 	ch <- resp
 	close(ch)
 	return ch, nil
+}
+
+// suggestionRoundMark 建议轮 prompt 的固定开头（buildSuggestPrompt 写入）。
+const suggestionRoundMark = "你是代码审查修复顾问"
+
+// isSuggestionRound 判断请求是否为建议生成轮（区别于复核轮的默认回放）。
+func isSuggestionRound(request *model.Request) bool {
+	if request == nil || len(request.Messages) == 0 {
+		return false
+	}
+	return strings.Contains(request.Messages[len(request.Messages)-1].Content, suggestionRoundMark)
 }
 
 // Info 返回模型信息。
