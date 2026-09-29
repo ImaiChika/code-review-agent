@@ -90,6 +90,34 @@ function renderEvidence(ev) {
     .replace(/(\*\*\*REDACTED\*\*\*|\*\*\*PRIVATE_KEY_REMOVED\*\*\*)/g, '<span class="redacted">$1</span>');
 }
 
+/* ---------- 树状导航（M8）----------
+   分组头点击展开/收起；展开状态持久化 localStorage；
+   激活子项时所属分组自动展开并高亮标题（激活路径追踪）。 */
+const NAV_OPEN_KEY = "cra_nav_open";
+let navOpenState = {};
+try { navOpenState = JSON.parse(localStorage.getItem(NAV_OPEN_KEY) || "{}"); } catch { navOpenState = {}; }
+
+function navGroupOf(el) { return el.closest(".nav-group"); }
+
+function setGroupOpen(group, open, persist) {
+  if (!group) return;
+  group.classList.toggle("open", open);
+  navOpenState[group.dataset.group] = open;
+  if (persist) localStorage.setItem(NAV_OPEN_KEY, JSON.stringify(navOpenState));
+}
+
+function initNav() {
+  document.querySelectorAll("#nav .nav-head").forEach(head => {
+    head.addEventListener("click", () => {
+      const group = navGroupOf(head);
+      setGroupOpen(group, !group.classList.contains("open"), true);
+    });
+    // 恢复持久化的展开状态（默认全收起，减少视觉噪音）
+    setGroupOpen(navGroupOf(head), navOpenState[navGroupOf(head).dataset.group] === true, false);
+  });
+}
+initNav();
+
 /* ---------- 路由 ---------- */
 const routes = [
   { re: /^#\/dashboard$/,      view: viewDashboard, crumb: "~/code-review-agent/<b>dashboard</b>" },
@@ -97,6 +125,8 @@ const routes = [
   { re: /^#\/tasks$/,          view: viewTasks,     crumb: "~/code-review-agent/<b>tasks</b>" },
   { re: /^#\/task\/(.+)$/,     view: viewTask,      crumb: "~/code-review-agent/tasks/<b>:id</b>" },
   { re: /^#\/rules$/,          view: viewRules,     crumb: "~/code-review-agent/<b>engine</b>" },
+  { re: /^#\/settings$/,       view: viewSettings,  crumb: "~/code-review-agent/<b>settings</b>" },
+  { re: /^#\/fp-marks$/,       view: viewFPMarks,   crumb: "~/code-review-agent/<b>fp-memory</b>" },
 ];
 
 async function route() {
@@ -105,8 +135,20 @@ async function route() {
     const m = hash.match(r.re);
     if (m) {
       $crumb.innerHTML = r.crumb.replace(":id", esc(m[1] || ""));
-      document.querySelectorAll(".nav a").forEach(a =>
-        a.classList.toggle("active", hash.startsWith(a.getAttribute("href"))));
+      // 激活态：叶子高亮；分组内叶子激活时给分组加 trail（标题着色）并展开
+      document.querySelectorAll("#nav a").forEach(a => {
+        const active = hash.startsWith(a.getAttribute("href"));
+        a.classList.toggle("active", active);
+        const group = navGroupOf(a);
+        if (group && active) {
+          group.classList.add("trail");
+          setGroupOpen(group, true, true);
+        }
+      });
+      document.querySelectorAll("#nav .nav-group").forEach(g => {
+        const anyActive = g.querySelector("a.active");
+        g.classList.toggle("trail", !!anyActive);
+      });
       $view.innerHTML = `<div class="boot"><span class="spin"></span></div>`;
       try { await r.view(m[1]); }
       catch (e) {
@@ -333,8 +375,19 @@ async function viewReview() {
         <input class="in" id="in-repo" placeholder="/path/to/repo">
       </div>
       <div class="field">
-        <label><input type="checkbox" id="cb-sandbox" style="vertical-align:-2px"> 执行沙箱 ${help("在沙箱中对仓库执行 go vet / go test。命令先经权限策略检查，deny/ask 不会执行")}</label>
+        <label><input type="checkbox" id="cb-sandbox" style="vertical-align:-2px"> 执行沙箱 ${help("在沙箱中对仓库执行 go vet / go test。命令先经权限策略检查，deny/ask 不会执行")}　后端
+          <select class="in" id="sel-sandbox" style="width:auto;padding:2px 6px">
+            <option value="local">本地（local）</option>
+            <option value="container">容器（container）</option>
+            <option value="e2b" disabled>E2B 云沙箱（未配置 Key）</option>
+          </select> ${help("local：服务器本机直接跑（开发用）；container：Docker 隔离（需服务器有 Docker）；e2b：E2B 云端沙箱，需在「智能与配置 → 模型与密钥」配置 API Key，未配置会直接提示")}
+        </label>
       </div>
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="cb-llm" style="vertical-align:-2px"> LLM 复核降噪 ${help("开启后规则结果会交给大模型逐条复核，剔除误报并生成更具体的修复建议。只送审少量候选，单次通常消耗几百 token 量级；需先在「智能与配置 → 模型与密钥」完成配置。默认关闭")}
+      <span class="dim" id="llm-ready-hint"></span></label>
     </div>
 
     <button class="btn" id="btn-run" onclick="submitReview()">执行审查</button>
@@ -343,6 +396,17 @@ async function viewReview() {
     <div id="review-result" style="margin-top:22px"></div>
   </div>`;
   log("就绪 — 粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR / 仓库路径");
+
+  // LLM 复核可用性提示（设置中心已配置 key 时亮起绿色提示）
+  try {
+    const st = await api("/api/settings");
+    const hint = document.getElementById("llm-ready-hint");
+    if (hint) hint.textContent = st.llm.ready ? "✓ 已就绪" : "（未配置：到「智能与配置 → 模型与密钥」设置后可用）";
+    const sel = document.getElementById("sel-sandbox");
+    if (sel && st.e2b.key_set) {
+      sel.querySelector("option[value=e2b]").disabled = false;
+    }
+  } catch { /* 设置读取失败不阻塞审查表单 */ }
 }
 
 const SRC_IDS = ["diff", "code", "upload", "pr", "repo"];
@@ -368,6 +432,9 @@ function loadSample(i) {
 
 async function submitReview() {
   const btn = document.getElementById("btn-run");
+  // M8-设置中心：LLM 复核开关（默认关闭，控成本——开启才带 llm_mode）
+  const llmOn = !!(document.getElementById("cb-llm") && document.getElementById("cb-llm").checked);
+  const llmField = () => llmOn ? { llm_mode: "openai" } : {};
   let submit; // () => Promise<{task_id,status}>
 
   if (reviewSource === "diff") {
@@ -376,7 +443,7 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ diff_content: diffText }),
+      body: JSON.stringify(Object.assign({ diff_content: diffText }, llmField())),
     });
   } else if (reviewSource === "code") {
     // M7-F3：粘贴整文件 → files_content
@@ -386,15 +453,15 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files_content: { [name]: content } }),
+      body: JSON.stringify(Object.assign({ files_content: { [name]: content } }, llmField())),
     });
   } else if (reviewSource === "upload") {
-    // M7-F3：multipart 上传（多文件或 zip）
+    // M7-F3：multipart 上传（多文件或 zip）；LLM 开关走查询参数（multipart 无 JSON body）
     const input = document.getElementById("in-upload");
     if (!input.files || !input.files.length) { log("请选择要上传的文件"); return; }
     const fd = new FormData();
     for (const f of input.files) fd.append("files", f, f.name);
-    submit = () => api("/api/reviews/upload", { method: "POST", body: fd });
+    submit = () => api("/api/reviews/upload" + (llmOn ? "?llm_mode=openai" : ""), { method: "POST", body: fd });
   } else if (reviewSource === "pr") {
     // M7-F3：GitHub PR 链接
     const prURL = document.getElementById("in-pr").value.trim();
@@ -402,16 +469,22 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pr_url: prURL }),
+      body: JSON.stringify(Object.assign({ pr_url: prURL }, llmField())),
     });
   } else {
     const repoPath = document.getElementById("in-repo").value.trim();
     const sandbox = document.getElementById("cb-sandbox").checked;
+    const backend = document.getElementById("sel-sandbox").value;
     if (!repoPath) { log("请填写仓库路径"); return; }
+    if (sandbox && backend === "e2b" &&
+        document.getElementById("sel-sandbox").selectedOptions[0].disabled) {
+      log("E2B 未配置 API Key：请到「智能与配置 → 模型与密钥」设置");
+      return;
+    }
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_path: repoPath, sandbox }),
+      body: JSON.stringify(Object.assign({ repo_path: repoPath, sandbox, sandbox_backend: backend }, llmField())),
     });
   }
 
@@ -552,9 +625,16 @@ function renderReviewResult(rep) {
   const sevSummary = Object.entries(SEV).map(([k, s]) =>
     `${s.label} <b style="color:${severityColor(k)}">${bySev[k] || 0}</b>`).join(" · ");
   const sandbox = rep.sandbox_summary || {};
+  // M8-设置中心：LLM 复核状态行（失败时黄条提示"已保留规则结果"）
+  let llmLine = "";
+  if (m.llm_mode) {
+    llmLine = `<span class="k">LLM 复核</span><span class="v">${esc(m.llm_mode)} · 送审 ${m.llm_reviewed} · 剔除 ${m.llm_dropped}` +
+      (m.llm_suggested !== undefined ? ` · 建议 ${m.llm_suggested}` : "") + `</span>`;
+  }
 
   $view.querySelector("#review-result").innerHTML = `
   <div class="view-enter">
+    ${m.llm_error ? `<div class="notice" style="background:var(--orange-soft);border-color:var(--orange)">⚠ LLM 复核调用失败（${esc(m.llm_error)}），本次结果为纯规则审查（保守保留全部候选）。请到 <a class="link" href="#/settings">模型与密钥</a> 检查配置。</div><div style="height:14px"></div>` : ""}
     ${panel("风险判定", `
       ${gaugeHTML(m.risk_score, m.risk_grade)}
       <div class="kv" style="margin-top:14px">
@@ -562,6 +642,7 @@ function renderReviewResult(rep) {
           <a class="link" href="#/task/${esc(rep.task_id)}">查看档案</a></span>
         <span class="k">扫描</span><span class="v">${rep.files_count} 个文件（Go ${rep.go_files_count}） · ${sevSummary} · 去重移除 ${rep.summary.dedup_removed}</span>
         <span class="k">耗时</span><span class="v">${esc(m.total_duration)}</span>
+        ${llmLine}
         ${sandbox.total_runs ? `<span class="k">沙箱</span><span class="v">${sandbox.successful}/${sandbox.total_runs} 通过 · ${esc(sandbox.total_duration)}</span>` : ""}
       </div>`, "评分 0-100，越高越危险；等级 A-F。证据中的密钥已自动脱敏")}
 
@@ -759,6 +840,236 @@ async function viewRules() {
     </div>
   </div>`;
   log(`规则引擎就绪 — ${data.rules.length} 条规则`);
+}
+
+/* ══════════════ 视图：模型与密钥（M8-设置中心） ══════════════ */
+/* 服务商选项：label + 默认 Base URL（选择时自动填充，可手改） */
+const PROVIDERS = [
+  { id: "dashscope", label: "通义千问 · 阿里云百炼（OpenAI 兼容）", base: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+  { id: "openai",    label: "OpenAI",                              base: "https://api.openai.com/v1" },
+  { id: "ollama",    label: "Ollama（本机，无需 Key）",             base: "http://localhost:11434/v1" },
+  { id: "custom",    label: "自定义（vLLM / OneAPI / 中转站 …）",   base: "" },
+];
+const MODEL_SUGGESTIONS = {
+  dashscope: ["qwen3.8-flash", "qwen-flash", "qwen-plus", "qwen3-coder-flash"],
+  openai: ["gpt-4o-mini", "gpt-4o"],
+  ollama: ["qwen2.5-coder:7b", "llama3.1:8b"],
+  custom: [],
+};
+
+let settingsCache = null;
+
+async function viewSettings() {
+  log("加载设置 …");
+  let st;
+  try { st = await api("/api/settings"); }
+  catch (e) {
+    $view.innerHTML = `<div class="view-enter"><div class="notice">✗ 读取设置失败：${esc(e.message)}</div></div>`;
+    return;
+  }
+  settingsCache = st;
+
+  const providerOpts = PROVIDERS.map(p =>
+    `<option value="${p.id}" ${st.llm.provider === p.id ? "selected" : ""}>${p.label}</option>`).join("");
+
+  $view.innerHTML = `
+  <div class="view-enter">
+    <h2 class="view-title">模型与密钥</h2>
+
+    <div class="grid grid-2">
+      <div>
+        ${panel("智能功能配置", `
+          <div class="field">
+            <label>模型服务商</label>
+            <select class="in" id="set-provider">${providerOpts}</select>
+          </div>
+          <div class="field">
+            <label>Base URL（OpenAI 兼容端点）</label>
+            <input class="in" id="set-base" value="${esc(st.llm.base_url)}" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+          </div>
+          <div class="field">
+            <label>模型名</label>
+            <input class="in" id="set-model" value="${esc(st.llm.model)}" list="model-list" placeholder="qwen3.8-flash">
+            <datalist id="model-list">${(MODEL_SUGGESTIONS[st.llm.provider] || []).map(m => `<option value="${m}">`).join("")}</datalist>
+          </div>
+          <div class="field">
+            <label>LLM API Key ${st.llm.key_set ? `<span class="badge info">已保存（尾号 ${esc(st.llm.key_hint.slice(-4))}，来源：${st.llm.key_source === "db" ? "本页设置" : "环境变量"}）</span> <a class="link" href="javascript:clearKey('llm')">清除</a>` : `<span class="badge low">未设置</span>`}</label>
+            <input class="in" type="password" id="set-llm-key" placeholder="${st.llm.key_set ? "留空保持不变；输入新值即覆盖" : "粘贴服务商发放的 API Key"}" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>E2B API Key（云端沙箱） ${st.e2b.key_set ? `<span class="badge info">已保存（尾号 ${esc(st.e2b.key_hint.slice(-4))}）</span> <a class="link" href="javascript:clearKey('e2b')">清除</a>` : `<span class="badge low">未设置</span>`}</label>
+            <input class="in" type="password" id="set-e2b-key" placeholder="${st.e2b.key_set ? "留空保持不变；输入新值即覆盖" : "e2b.dev 控制台获取"}" autocomplete="off">
+          </div>
+          <div style="display:flex;gap:10px;margin-top:6px">
+            <button class="btn" id="btn-save-settings" onclick="saveSettings()">保存设置</button>
+            <button class="btn btn-ghost" id="btn-test-llm" onclick="testLLM()">测试连接</button>
+          </div>
+          <div id="test-result" style="margin-top:12px"></div>
+        `, "保存后立即对新审查生效，无需重启服务。密钥不会回传浏览器明文，只显示尾号")}
+      </div>
+
+      <div>
+        ${panel("当前状态", `
+          <div class="kv">
+            <span class="k">LLM 复核</span><span class="v">${st.llm.ready ? `<b style="color:var(--green)">✓ 就绪</b>（${esc(st.llm.model || "未设模型名")}）` : "未配置 — 新建审查页的「LLM 复核降噪」开关不可用"}</span>
+            <span class="k">E2B 云沙箱</span><span class="v">${st.e2b.key_set ? `<b style="color:var(--green)">✓ 已配置</b>` : "未配置 — 仓库审查选 E2B 后端会提示"}</span>
+            <span class="k">服务默认沙箱</span><span class="v mono">${esc(st.sandbox_default)}</span>
+            <span class="k">写操作认证</span><span class="v">${st.auth_enabled ? "已启用（修改设置需 token）" : "未启用（本地模式）"}</span>
+          </div>`)}
+
+        ${panel("安全说明", `
+          <div class="dim" style="line-height:1.9;font-size:12.5px">
+            · API Key 只保存在<b>服务器本机</b>的 SQLite 数据库（cr_settings 表），不会出现在日志、报告或任务记录里；<br>
+            · 浏览器只会看到尾号提示（如 sk-…mZNw），刷新后也拿不到完整 key；<br>
+            · 修改设置属于写操作：服务开启 --auth-token 时需要凭证；<br>
+            · 请勿把服务器地址和 token 发给不信任的人——他们能以你的 key 消耗模型额度；<br>
+            · 如怀疑泄露：先在服务商控制台吊销 key，再回这里清除并换新。
+          </div>`)}
+
+        ${panel("成本说明（省钱纪律）", `
+          <div class="dim" style="line-height:1.9;font-size:12.5px">
+            · LLM 复核<b>默认关闭</b>，每次审查都要在新建审查页手动勾选；<br>
+            · 复核把候选问题打包成<b>一次请求</b>发送，单次审查通常消耗几百 token 量级（flash 级模型约几厘钱）；<br>
+            · 建议用 flash / mini 级小模型做复核，够用且便宜；<br>
+            · 「测试连接」只花 1 个 token（max_tokens=1），随便点不心疼；<br>
+            · 想批量跑数据集做 LLM 对照实验？那是开发者命令（go test），不要在 web 界面连点审查刷 token。
+          </div>`)}
+      </div>
+    </div>
+  </div>`;
+
+  // 服务商切换 → 自动填默认 Base URL 与模型建议（用户可手改）
+  document.getElementById("set-provider").addEventListener("change", e => {
+    const p = PROVIDERS.find(x => x.id === e.target.value);
+    if (p && p.base) document.getElementById("set-base").value = p.base;
+    document.getElementById("model-list").innerHTML =
+      (MODEL_SUGGESTIONS[e.target.value] || []).map(m => `<option value="${m}">`).join("");
+  });
+  log(`设置就绪 — LLM ${st.llm.ready ? "已就绪" : "未配置"} · E2B ${st.e2b.key_set ? "已配置" : "未配置"}`);
+}
+
+async function saveSettings() {
+  const btn = document.getElementById("btn-save-settings");
+  const body = {
+    llm_provider: document.getElementById("set-provider").value,
+    llm_base_url: document.getElementById("set-base").value.trim(),
+    llm_model: document.getElementById("set-model").value.trim(),
+  };
+  const llmKey = document.getElementById("set-llm-key").value.trim();
+  if (llmKey) body.llm_api_key = llmKey;
+  const e2bKey = document.getElementById("set-e2b-key").value.trim();
+  if (e2bKey) body.e2b_api_key = e2bKey;
+
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> 保存中 …`;
+  try {
+    const st = await api("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    settingsCache = st;
+    log("设置已保存，对新审查立即生效");
+    await viewSettings(); // 重渲染拿到新的已保存提示
+  } catch (e) {
+    log(`保存失败 — ${e.message}`);
+    const box = document.getElementById("test-result");
+    if (box) box.innerHTML = `<div class="notice">✗ 保存失败：${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = "保存设置";
+  }
+}
+
+async function clearKey(which) {
+  const body = which === "llm" ? { llm_api_key: "-" } : { e2b_api_key: "-" };
+  try {
+    await api("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    log(which === "llm" ? "LLM API Key 已清除" : "E2B API Key 已清除");
+    await viewSettings();
+  } catch (e) {
+    log(`清除失败 — ${e.message}`);
+  }
+}
+
+async function testLLM() {
+  const btn = document.getElementById("btn-test-llm");
+  const box = document.getElementById("test-result");
+  const body = {
+    llm_base_url: document.getElementById("set-base").value.trim(),
+    llm_model: document.getElementById("set-model").value.trim(),
+  };
+  const typed = document.getElementById("set-llm-key").value.trim();
+  if (typed) body.llm_api_key = typed; // 测试专用，不落库
+
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> 测试中 …`;
+  box.innerHTML = `<div class="notice progress" style="display:flex;align-items:center;gap:10px"><span class="spin"></span><span>正在连接服务商 …（只花 1 个 token）</span></div>`;
+  try {
+    const r = await api("/api/settings/test", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      box.innerHTML = `<div class="notice" style="background:var(--green-soft);border-color:var(--green)">✓ 连接成功 — 模型 <b class="mono">${esc(r.model)}</b> 可用 · 延迟 ${r.latency_ms}ms</div>`;
+      log("测试连接成功");
+    } else {
+      box.innerHTML = `<div class="notice">✗ 连接失败（${esc(r.code)}）：${esc(r.message)}</div>`;
+      log(`测试连接失败 — ${r.message}`);
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="notice">✗ 测试请求失败：${esc(e.message)}${String(e.message).includes("401") ? "（开启认证后修改设置需要 token）" : ""}</div>`;
+    log(`测试请求失败 — ${e.message}`);
+  } finally {
+    btn.disabled = false; btn.innerHTML = "测试连接";
+  }
+}
+
+/* ══════════════ 视图：误报记忆（M8-C9 管理页） ══════════════ */
+async function viewFPMarks() {
+  log("加载误报记忆 …");
+  let data;
+  try { data = await api("/api/fp-marks"); }
+  catch (e) {
+    $view.innerHTML = `<div class="view-enter"><div class="notice">✗ 读取失败：${esc(e.message)}</div></div>`;
+    return;
+  }
+  const marks = data.marks || [];
+  const rows = marks.map(m => `
+    <tr>
+      <td class="mono">${m.id}</td>
+      <td class="mono">${esc(m.rule_id)}</td>
+      <td class="mono">${esc(m.file_path)}${m.line ? ":" + m.line : ""}</td>
+      <td class="dim mono">${esc(m.task_id || "")}</td>
+      <td class="dim">${fmtTime(m.created_at)}</td>
+      <td><button class="btn btn-ghost" style="padding:3px 10px;font-size:12px" onclick="delFP(${m.id})">撤销</button></td>
+    </tr>`).join("");
+
+  $view.innerHTML = `
+  <div class="view-enter">
+    <h2 class="view-title">误报记忆</h2>
+    ${panel(`已记忆的误报模式（${marks.length}）`, marks.length ? `<table class="t">
+      <thead><tr><th>#</th><th>规则</th><th>位置</th><th>标记来源任务</th><th>标记时间</th><th>操作</th></tr></thead>
+      <tbody>${rows}</tbody></table>`
+      : `<div class="empty">还没有记忆。在审查结果里点某条问题的「标记误报」，它就会出现在这里。</div>`,
+      "同一规则 + 同一文件（含行号）再报出时自动降为警告；撤销后恢复正常上报")}
+    <div style="height:14px"></div>
+    ${panel("它的作用", `<div class="dim" style="line-height:1.9;font-size:12.5px">
+      觉得某条报错判断错了？点它的「标记误报」，系统会记住这个模式：<br>
+      · <b>精确匹配</b>（同规则同文件同行）→ 置信度 ×0.5；<br>
+      · <b>文件级匹配</b>（同规则同文件其他行）→ 置信度 ×0.6（容忍行号漂移）；<br>
+      · 降级后<b>不删除</b>：进「警告」区，仍可人工看到；<br>
+      · 在这里点「撤销」即恢复正常上报。
+    </div>`)}
+  </div>`;
+  log(`误报记忆就绪 — ${marks.length} 条`);
+}
+
+async function delFP(id) {
+  try {
+    await api(`/api/fp-marks?id=${id}`, { method: "DELETE" });
+    log(`已撤销记忆 #${id}`);
+    await viewFPMarks();
+  } catch (e) {
+    log(`撤销失败 — ${e.message}`);
+    alert(`撤销失败：${e.message}`);
+  }
 }
 
 /* ---------- 启动 ---------- */

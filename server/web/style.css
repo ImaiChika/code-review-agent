@@ -81,6 +81,49 @@ body {
 .nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .nav a.active .nav-key { color: var(--accent); opacity: .7; }
 
+/* ─── 树状导航（M8-设置中心引入）：分组头可点击展开/收起，子项缩进两级 ─── */
+.nav-group { margin: 2px 0; }
+.nav-head {
+  display: flex; align-items: baseline; gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0; background: none; cursor: pointer;
+  color: var(--ink-2); font-size: 13px; font-family: var(--cjk);
+  text-align: left;
+  border-radius: 6px;
+  transition: background .15s, color .15s;
+}
+.nav-head .nav-key { font-size: 10px; color: var(--ink-dim); font-family: var(--mono); }
+.nav-head .nav-label { flex: 1; }
+.nav-head .nav-caret {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+  transition: transform .18s ease;
+}
+.nav-head:hover { color: var(--ink); background: var(--bg-soft); }
+/* 展开态：箭头转 90° 朝下 */
+.nav-group.open .nav-head .nav-caret { transform: rotate(90deg); }
+/* 分组内有激活子项：标题靛蓝着色（激活路径追踪） */
+.nav-group.trail .nav-head { color: var(--accent); font-weight: 600; }
+.nav-group.trail .nav-head .nav-key { color: var(--accent); opacity: .7; }
+.nav-sub {
+  display: none;
+  padding: 2px 0 4px;
+}
+.nav-group.open .nav-sub { display: block; }
+.nav-sub a {
+  padding: 7px 12px 7px 30px;
+  font-size: 12.5px;
+  position: relative;
+}
+/* 子项左侧竖线：层级感（终端风细线，非彩色块） */
+.nav-sub a::before {
+  content: "";
+  position: absolute; left: 20px; top: 6px; bottom: 6px;
+  width: 1px; background: var(--line);
+}
+.nav-sub a.active { background: var(--accent-soft); }
+.nav-sub a.active::before { background: var(--accent); width: 2px; }
+
 .side-foot { padding: 12px 20px 0; border-top: 1px solid var(--line); }
 .foot-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11px; }
 .foot-row .k { color: var(--ink-dim); }

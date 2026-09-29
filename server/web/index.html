@@ -16,10 +16,29 @@
       <div class="brand-sub">代码审查控制台</div>
     </div>
 
-    <nav class="nav">
+    <nav class="nav" id="nav">
       <a href="#/dashboard" data-nav="dashboard"><span class="nav-key">01</span>总览看板</a>
-      <a href="#/review" data-nav="review"><span class="nav-key">02</span>新建审查</a>
-      <a href="#/tasks" data-nav="tasks"><span class="nav-key">03</span>任务记录</a>
+
+      <div class="nav-group" data-group="review">
+        <button class="nav-head" type="button" data-toggle="review">
+          <span class="nav-key">02</span><span class="nav-label">审查中心</span><span class="nav-caret">▸</span>
+        </button>
+        <div class="nav-sub">
+          <a href="#/review" data-nav="review">新建审查</a>
+          <a href="#/tasks" data-nav="tasks">任务记录</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="config">
+        <button class="nav-head" type="button" data-toggle="config">
+          <span class="nav-key">03</span><span class="nav-label">智能与配置</span><span class="nav-caret">▸</span>
+        </button>
+        <div class="nav-sub">
+          <a href="#/settings" data-nav="settings">模型与密钥</a>
+          <a href="#/fp-marks" data-nav="fpmarks">误报记忆</a>
+        </div>
+      </div>
+
       <a href="#/rules" data-nav="rules"><span class="nav-key">04</span>规则引擎</a>
     </nav>
 
