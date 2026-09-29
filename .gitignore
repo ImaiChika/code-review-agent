@@ -28,6 +28,9 @@ Users/
 work/
 .run/
 
+# === 本地密钥（.env：E2B/LLM key 备份，docker compose 读取；严禁提交）===
+.env
+
 # === IDE / 编辑器 ===
 .idea/
 .vscode/
