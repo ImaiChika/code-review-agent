@@ -634,3 +634,81 @@ func TestStats_TotalAccurate_Beyond200(t *testing.T) {
 		t.Errorf("当日任务数 = %v, 期望 ≥ 250", day["tasks"])
 	}
 }
+
+// ========== M8-C9：误报标记 API ==========
+
+func TestFPMark_API_Lifecycle(t *testing.T) {
+	ts := newTestServer(t)
+
+	// 先提交一次审查拿 taskID
+	sub := submitReview(t, ts, `{"diff_content":"--- a/creds.go\n+++ b/creds.go\n@@ -1,2 +1,4 @@\n package creds\n \n+var apiKey = \"sk-live-f9f9f9f9f9f9\"\n+var _ = 1\n"}`)
+	id := sub["task_id"].(string)
+
+	// 标记误报
+	res, err := http.Post(ts.URL+"/api/tasks/"+id+"/fp-marks", "application/json",
+		strings.NewReader(`{"rule_id":"SEC-AST-001","file":"creds.go","line":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("标记 status = %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// 列表可见
+	lres, _ := http.Get(ts.URL + "/api/fp-marks")
+	var list map[string]any
+	json.NewDecoder(lres.Body).Decode(&list)
+	lres.Body.Close()
+	if list["count"].(float64) != 1 {
+		t.Errorf("marks count = %v, 期望 1", list["count"])
+	}
+	markID := list["marks"].([]any)[0].(map[string]any)["id"].(float64)
+
+	// 参数校验：缺字段 400
+	res2, _ := http.Post(ts.URL+"/api/tasks/"+id+"/fp-marks", "application/json",
+		strings.NewReader(`{"rule_id":""}`))
+	res2.Body.Close()
+	if res2.StatusCode != http.StatusBadRequest {
+		t.Errorf("缺字段 status = %d, 期望 400", res2.StatusCode)
+	}
+
+	// 撤销（无认证实例：直接允许）
+	dreq, _ := http.NewRequest("DELETE", ts.URL+"/api/fp-marks?id="+fmt.Sprintf("%.0f", markID), nil)
+	dres, _ := http.DefaultClient.Do(dreq)
+	dres.Body.Close()
+	if dres.StatusCode != http.StatusOK {
+		t.Errorf("撤销 status = %d, 期望 200", dres.StatusCode)
+	}
+	lres2, _ := http.Get(ts.URL + "/api/fp-marks")
+	var list2 map[string]any
+	json.NewDecoder(lres2.Body).Decode(&list2)
+	lres2.Body.Close()
+	if list2["count"].(float64) != 0 {
+		t.Errorf("撤销后 count = %v, 期望 0", list2["count"])
+	}
+}
+
+func TestFPMark_DeleteRequiresAuth(t *testing.T) {
+	ts := newAuthTestServer(t, validToken, 100, 100, 0)
+	dreq, _ := http.NewRequest("DELETE", ts.URL+"/api/fp-marks?id=1", nil)
+	dres, err := http.DefaultClient.Do(dreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dres.Body.Close()
+	if dres.StatusCode != http.StatusUnauthorized {
+		t.Errorf("无 token 撤销 status = %d, 期望 401", dres.StatusCode)
+	}
+	// 带 token 放行（id 不存在也只是 no-op 删除，仍 200）
+	dreq2, _ := http.NewRequest("DELETE", ts.URL+"/api/fp-marks?id=999", nil)
+	dreq2.Header.Set("X-Auth-Token", validToken)
+	dres2, err := http.DefaultClient.Do(dreq2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dres2.Body.Close()
+	if dres2.StatusCode != http.StatusOK {
+		t.Errorf("带 token 撤销 status = %d, 期望 200", dres2.StatusCode)
+	}
+}

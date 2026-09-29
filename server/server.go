@@ -24,6 +24,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -33,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,10 +150,50 @@ func (s *Server) routes() {
 	s.mux.Handle("/api/reviews", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleCreateReview))))
 	s.mux.Handle("/api/reviews/upload", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleUploadReview))))
 	s.mux.HandleFunc("/api/tasks", s.method("GET", s.handleListTasks))
-	s.mux.HandleFunc("/api/tasks/", s.method("GET", s.handleTaskDetail))
+	// /api/tasks/{id}（GET 详情）与 /api/tasks/{id}/fp-marks（POST 标记误报）
+	// 同前缀必须合并注册，ServeMux 不允许重复 pattern
+	s.mux.HandleFunc("/api/tasks/", s.handleTaskRoutes)
 	s.mux.HandleFunc("/api/stats", s.method("GET", s.handleStats))
 	s.mux.HandleFunc("/api/rules", s.method("GET", s.handleRules))
 	s.mux.HandleFunc("/api/samples", s.method("GET", s.handleSamples))
+	// M8-C9：误报标记记忆降噪（写操作受认证保护；标记属于写语义）
+	s.mux.HandleFunc("/api/fp-marks", s.fpMarksMethod(s.handleListFPMarks, s.handleDeleteFPMark))
+}
+
+// fpMarksMethod 误报标记端点：GET=列表（公开读），DELETE=撤销（写，受认证）。
+func (s *Server) fpMarksMethod(getH, delH http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getH(w, r)
+		case http.MethodDelete:
+			// 仅在配置了 token 且不匹配时拒绝（未配置 = 本地模式直接放行）
+			if s.cfg.AuthToken != "" &&
+				subtle.ConstantTimeCompare([]byte(extractToken(r)), []byte(s.cfg.AuthToken)) != 1 {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="code-review-agent"`)
+				writeErr(w, http.StatusUnauthorized, "需要认证才能撤销误报标记")
+				return
+			}
+			delH(w, r)
+		default:
+			writeErr(w, http.StatusMethodNotAllowed, "需要 GET 或 DELETE 方法")
+		}
+	}
+}
+
+// handleDeleteFPMark 撤销一条误报标记（恢复该模式的正常上报）。
+func (s *Server) handleDeleteFPMark(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "需要合法的 id 查询参数")
+		return
+	}
+	if err := s.store.DeleteFalsePositiveMark(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // method 包装 handler 做请求方法校验。
@@ -453,6 +495,86 @@ func (s *Server) handleUploadReview(w http.ResponseWriter, r *http.Request) {
 		"task_id": job.id,
 		"status":  "queued",
 	})
+}
+
+// handleTaskRoutes 分派 /api/tasks/ 子路由：
+// GET /api/tasks/{id}（详情）与 POST /api/tasks/{id}/fp-marks（标记误报）。
+func (s *Server) handleTaskRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tasks/"), "/")
+	if strings.HasSuffix(rest, "/fp-marks") {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "需要 POST 方法")
+			return
+		}
+		s.handleMarkFalsePositive(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "需要 GET 方法")
+		return
+	}
+	s.handleTaskDetail(w, r)
+}
+
+// markFPRequest POST /api/tasks/{id}/fp-marks 请求体（M8-C9）。
+type markFPRequest struct {
+	RuleID string `json:"rule_id"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+}
+
+// handleMarkFalsePositive 记录一条误报标记：影响后续审查的同模式上报。
+func (s *Server) handleMarkFalsePositive(w http.ResponseWriter, r *http.Request) {
+	// 路径形如 /api/tasks/{taskID}/fp-marks
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tasks/"), "/")
+	if !strings.HasSuffix(rest, "/fp-marks") {
+		writeErr(w, http.StatusNotFound, "页面不存在")
+		return
+	}
+	taskID := strings.TrimSuffix(rest, "/fp-marks")
+	if taskID == "" {
+		writeErr(w, http.StatusBadRequest, "缺少任务 ID")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var req markFPRequest
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.RuleID == "" || req.File == "" {
+		writeErr(w, http.StatusBadRequest, "rule_id 与 file 必填")
+		return
+	}
+
+	if err := s.store.SaveFalsePositiveMark(&storage.FalsePositiveMark{
+		RuleID:    req.RuleID,
+		FilePath:  req.File,
+		Line:      req.Line,
+		TaskID:    taskID,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存误报标记失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "已记录误报标记，同类问题后续审查将自动降级为警告",
+	})
+}
+
+// handleListFPMarks 列出全部误报标记（透明度：用户可查看已记忆的模式）。
+func (s *Server) handleListFPMarks(w http.ResponseWriter, r *http.Request) {
+	marks, err := s.store.ListFalsePositiveMarks()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if marks == nil {
+		marks = []*storage.FalsePositiveMark{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"marks": marks, "count": len(marks)})
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {

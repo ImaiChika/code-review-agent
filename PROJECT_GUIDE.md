@@ -627,7 +627,8 @@ rules:
 > **📋 M8 执行进度记录（2026-09-29 起执行，每完成一项在此登记）**
 >
 > - ✅ **C3 LLM 修复建议完成（2026-09-29，M8 首项）**：`llmreview/suggest.go` 新增 `Suggest()`——建议轮协议 `序号. 一行建议`（`suggestRe` 解析，首匹配优先，越界/空行忽略；`oneLine` 单行压缩防注入），prompt 携带规则/定位/脱敏证据/现有建议，并**要求每条建议独立完整、禁止"同上"引用**（单测抓到的真实 UX 缺口：建议在前端逐条独立展示，引用式建议脱离上下文不可读）。管线新增 **Step 4.6**（复核后、评分前）：`Recommendation` 替换为 LLM 文案并经 `safety.MaskSensitiveInfo` 兜底脱敏（LLM 文本是新的文本入口，与 finding 出口同一纪律），`Monitor.LLMSuggested` 计数；缺失/失败保守保留静态建议。FakeModel **轮次区分**：复核轮（默认全 CONFIRM，M4 语义不变）/ 建议轮（prompt 含"修复顾问"标记，默认回放**空响应** → 静态建议保留、确定性可复现；显式 Push 两段响应验证替换）。前端/HTML 报告/落库零改动（渲染的就是 recommendation）。测试：llmreview +6（解析/缺失保留/失败保留/越界/单行折叠/轮次互不串扰）、review 管线 +2（两段响应替换成功+脱敏 / 默认建议轮 recall 不降）；全量 14 包 `-race` 全绿、数据集门禁不回退。实机：`--fake-model` 全链路 `llm_suggested=0`（默认空建议轮，确定性）。
-> - ⏭ 下一步：C9 误报标记记忆降噪（前端"标记误报"→落库→同模式降置信度闭环）。
+> - ✅ **C9 误报标记记忆降噪完成（2026-09-29）**：闭环 = 前端 finding 展开"标记误报"→ `POST /api/tasks/{id}/fp-marks` 落 `cr_false_positive_marks` → 后续审查 Step 3.9（去重前）对同模式降置信度（精确 rule+file+line ×0.5；文件级 rule+file ×0.6 容忍行号漂移）→ 低于 0.7 阈值自动进 warnings 桶（降级不删除，人工仍可看到）；`GET /api/fp-marks` 列表 + `DELETE ?id=` 撤销（恢复上报；写语义受认证）。**设计决策**：v1 用自建表 + 内存匹配（marks 规模=人工标记数，全量拉取零成本），`memory/sqlitevec` 向量化相似匹配留 backlog（跨文件模式归纳）；**dry-run 不读库**（回归测试 TestRun_DiffFileDryRun 守护——不读也不创建库文件）。修掉两个实现 bug：ServeMux 重复注册 `/api/tasks/` panic（GET 详情与 POST 标记合并为 handleTaskRoutes 方法分派）、fpMarks DELETE 认证条件写反（无 token 实例被误拒 401）。测试：storage CRUD +1、管线闭环 +1（标记→同位置出 findings 消失/入 warnings 且 conf<0.7、撤销恢复）、server API +2（生命周期/认证）；全量 13 包 `-race` 全绿、数据集门禁不回退。**实机闭环**：首审 2 findings → 标记 line:3 → 重审该行 0.9→0.45 入 warnings（相邻行不受影响）→ 撤销 → 恢复 2 findings 0 warnings；浏览器按钮"标记误报→已标记 ✓"验证 + 截图视觉验收。
+> - ⏭ 下一步：D3 go/types 类型增强（repo 模式加载类型信息，RES/ERR 规则从"猜"变"知道"）。
 
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
@@ -672,7 +673,7 @@ rules:
 | C6 | **包成 MCP server** | 让 Claude Code / Cursor 等 MCP 客户端直接调 `code_review` 工具审查当前 diff；框架 `server/` 有 MCP 服务端支持 | M |
 | C7 | 服务化（PR 机器人） | `server/a2a` 或 `server/openai`（OpenAI 兼容 API）暴露服务；接 GitHub webhook 实现 PR 自动审查回评 | L |
 | C8 | **评测集** | 用框架 `evaluation/` 建 evalset：N 个已知问题的 diff + 期望 findings，跑出 precision/recall/FPR，量化"检出率 ≥80%、误报 ≤15%"；LLM rubric 可评报告质量 | M |
-| C9 | 记忆降噪 | `memory/sqlitevec`：记录"某文件某规则的历史 finding 被人工标记误报"，下次降置信度 | M |
+| C9 | 记忆降噪 ✅（2026-09-29，v1 保守模式） | 自建 `cr_false_positive_marks` 表（rule+file+line）；同模式再报自动降置信度（精确 ×0.5 / 文件级 ×0.6）入 warnings；前端"标记误报"按钮 + `GET/DELETE /api/fp-marks` 撤销闭环；dry-run 不读库 | M |
 | C10 | prompt 迭代优化 | `evaluation/workflow/promptiter` 优化 C1/C3 的复核 prompt，防过拟合 | L |
 
 #### D 层：工程化增强（与框架无关但实用）

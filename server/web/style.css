@@ -351,3 +351,10 @@ a.link:hover { text-decoration: underline; }
 .notice { border: 1px solid #fecaca; background: var(--red-soft); color: var(--red); padding: 10px 14px; margin-bottom: 14px; border-radius: 8px; font-size: 12px; }
 /* 进行中状态（M7-F1 轮询）：中性靛蓝，区别于错误态的红色 */
 .notice.progress { border-color: #c7d2fe; background: var(--accent-soft); color: var(--accent); }
+
+/* M8-C9：误报标记按钮 */
+.finding-fp { margin-top:10px; }
+.fp-btn { font-size:11px; padding:3px 10px; border-radius:99px; border:1px solid var(--line);
+  background:#fff; color:var(--dim); cursor:pointer; }
+.fp-btn:hover { border-color:var(--violet); color:var(--violet); }
+.fp-btn.done { border-color:var(--green); color:var(--green); background:#f0fdf4; cursor:default; }

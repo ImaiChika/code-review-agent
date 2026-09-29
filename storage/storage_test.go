@@ -466,3 +466,35 @@ func TestMigrateColumns_OldSchema(t *testing.T) {
 		t.Errorf("迁移后新数据 risk 读写不符: %.1f/%q", got.RiskScore, got.RiskGrade)
 	}
 }
+
+// TestFalsePositiveMarks M8-C9：误报标记 CRUD（保存/列表/删除）。
+func TestFalsePositiveMarks(t *testing.T) {
+	store := newTestStore(t)
+
+	m := &FalsePositiveMark{
+		RuleID: "SEC-AST-001", FilePath: "creds.go", Line: 3,
+		TaskID: "task-fp-1", CreatedAt: time.Now(),
+	}
+	if err := store.SaveFalsePositiveMark(m); err != nil {
+		t.Fatalf("SaveFalsePositiveMark: %v", err)
+	}
+	if m.ID <= 0 {
+		t.Fatal("保存后应回填 ID")
+	}
+
+	marks, err := store.ListFalsePositiveMarks()
+	if err != nil || len(marks) != 1 {
+		t.Fatalf("ListFalsePositiveMarks = %d 项 (err=%v), 期望 1", len(marks), err)
+	}
+	if marks[0].RuleID != "SEC-AST-001" || marks[0].Line != 3 || marks[0].TaskID != "task-fp-1" {
+		t.Errorf("回读字段不符: %+v", marks[0])
+	}
+
+	if err := store.DeleteFalsePositiveMark(marks[0].ID); err != nil {
+		t.Fatalf("DeleteFalsePositiveMark: %v", err)
+	}
+	marks, _ = store.ListFalsePositiveMarks()
+	if len(marks) != 0 {
+		t.Errorf("删除后应剩 0 项, 得到 %d", len(marks))
+	}
+}

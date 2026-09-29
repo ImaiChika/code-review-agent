@@ -58,6 +58,11 @@ type Store interface {
 	GetFindingStats() (*FindingStats, error)
 	GetTrendStats() (*TrendStats, error)
 
+	// 误报标记（M8-C9：记忆降噪）
+	SaveFalsePositiveMark(mark *FalsePositiveMark) error
+	ListFalsePositiveMarks() ([]*FalsePositiveMark, error)
+	DeleteFalsePositiveMark(id int64) error
+
 	// 生命周期
 	Close() error
 }
@@ -95,6 +100,17 @@ type TrendDay struct {
 	Date    string  `json:"date"`     // YYYY-MM-DD
 	Tasks   int     `json:"tasks"`    // 当天任务数
 	AvgRisk float64 `json:"avg_risk"` // 当天平均风险分
+}
+
+// FalsePositiveMark 人工标记的误报记录（M8-C9）。
+// 同一 rule_id + 文件（可含行号）再次报出时，管线自动降置信度进 warnings。
+type FalsePositiveMark struct {
+	ID        int64     `json:"id"`
+	RuleID    string    `json:"rule_id"`
+	FilePath  string    `json:"file_path"` // 标记时的完整文件路径（匹配键之一）
+	Line      int       `json:"line"`      // 标记时行号（精确匹配键；0 = 仅按文件匹配）
+	TaskID    string    `json:"task_id"`   // 标记来源任务
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // TrendStats 趋势聚合（M7-F5，纯 SQL 聚合，任务数无关的 O(1) 响应）。
@@ -247,6 +263,14 @@ func (s *SQLiteStore) initTables() error {
 			json_report TEXT,
 			md_report TEXT,
 			FOREIGN KEY (task_id) REFERENCES cr_review_tasks(task_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS cr_false_positive_marks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			rule_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			line INTEGER DEFAULT 0,
+			task_id TEXT,
+			created_at DATETIME NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS cr_artifacts (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -846,4 +870,54 @@ func (s *SQLiteStore) GetTrendStats() (*TrendStats, error) {
 		stats.Recent = []*ReviewTask{}
 	}
 	return stats, nil
+}
+
+// ========== 误报标记（M8-C9：记忆降噪） ==========
+
+// SaveFalsePositiveMark 记录一条人工误报标记。
+func (s *SQLiteStore) SaveFalsePositiveMark(mark *FalsePositiveMark) error {
+	res, err := s.db.Exec(
+		`INSERT INTO cr_false_positive_marks (rule_id, file_path, line, task_id, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		mark.RuleID, mark.FilePath, mark.Line, mark.TaskID, mark.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if id, err := res.LastInsertId(); err == nil {
+		mark.ID = id
+	}
+	return nil
+}
+
+// ListFalsePositiveMarks 返回全部误报标记（表规模=人工标记数，全量拉取内存匹配）。
+func (s *SQLiteStore) ListFalsePositiveMarks() ([]*FalsePositiveMark, error) {
+	rows, err := s.db.Query(
+		`SELECT id, rule_id, file_path, line, task_id, created_at
+		 FROM cr_false_positive_marks ORDER BY id DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var marks []*FalsePositiveMark
+	for rows.Next() {
+		var m FalsePositiveMark
+		var taskID sql.NullString
+		if err := rows.Scan(&m.ID, &m.RuleID, &m.FilePath, &m.Line, &taskID, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		if taskID.Valid {
+			m.TaskID = taskID.String
+		}
+		marks = append(marks, &m)
+	}
+	return marks, nil
+}
+
+// DeleteFalsePositiveMark 撤销一条误报标记（恢复该模式的正常上报）。
+func (s *SQLiteStore) DeleteFalsePositiveMark(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM cr_false_positive_marks WHERE id = ?`, id)
+	return err
 }

@@ -305,6 +305,14 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	// M3-D2：沙箱内静态工具（staticcheck）的发现并入，一起参与去重
 	allFindings = append(allFindings, counters.toolFindings...)
 
+	// ========== Step 3.9: 误报记忆降噪（M8-C9） ==========
+	// 历史被人工标记误报的同模式问题自动降置信度——低于 0.7 阈值将在
+	// 随后的 Deduplicate 中进入 warnings 桶（人工复核），不再刷屏。
+	// dry-run 不读库（也不应创建库文件，见 TestRun_DiffFileDryRun）。
+	if !opts.DryRun {
+		applyFalsePositiveMemory(allFindings, opts.DBPath)
+	}
+
 	// ========== Step 4: 去重和分组 ==========
 	dedupResult := findings.Deduplicate(allFindings)
 

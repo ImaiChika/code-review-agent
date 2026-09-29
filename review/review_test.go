@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"code-review-agent/diff"
 	"code-review-agent/report"
+	"code-review-agent/storage"
 )
 
 // TestEnsureOutputDir 验证 --output 目录自动创建（M0-A2，修 P0-2）。
@@ -455,5 +457,68 @@ func TestRun_FakeModelSuggestionRoundDefault(t *testing.T) {
 		if f.Recommendation == "" {
 			t.Errorf("finding %s 应保留静态建议", f.RuleID)
 		}
+	}
+}
+
+// TestRun_FPMemoryDowngrade M8-C9 管线级闭环：预先落一条误报标记，
+// 重审同一 diff → 同位置问题 confidence 降级并进入 warnings（不再占用 findings）。
+func TestRun_FPMemoryDowngrade(t *testing.T) {
+	outDir := t.TempDir()
+	dbPath := filepath.Join(outDir, "review.db")
+
+	// 基线：security_issue.diff 产出 2 条 SEC-AST-001 findings
+	// 注：非 dry-run——记忆降噪在 dry-run 下不读库（TestRun_DiffFileDryRun 守护该语义）
+	base, err := Run(Options{
+		DiffFile:  "../testdata/security_issue.diff",
+		OutputDir: t.TempDir(), DBPath: dbPath, SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base.Findings) == 0 {
+		t.Fatal("基线应有 findings")
+	}
+	target := base.Findings[0]
+
+	// 落误报标记（rule + file + line 精确匹配）
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveFalsePositiveMark(&storage.FalsePositiveMark{
+		RuleID: target.RuleID, FilePath: target.File, Line: target.Line,
+		TaskID: "task-manual", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	// 重审：同位置问题应降级进 warnings
+	after, err := Run(Options{
+		DiffFile:  "../testdata/security_issue.diff",
+		OutputDir: t.TempDir(), DBPath: dbPath, SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range after.Findings {
+		if f.RuleID == target.RuleID && f.File == target.File && f.Line == target.Line {
+			t.Errorf("标记过的位置不应再出现在 findings: %s %s:%d", f.RuleID, f.File, f.Line)
+		}
+	}
+	found := false
+	for _, w := range after.Warnings {
+		if w.RuleID == target.RuleID && w.File == target.File && w.Line == target.Line {
+			found = true
+			if w.Confidence >= 0.7 {
+				t.Errorf("降级后 confidence 应 < 0.7, 得到 %.2f", w.Confidence)
+			}
+			if w.Confidence >= target.Confidence {
+				t.Errorf("降级后 confidence 应低于原值 %.2f, 得到 %.2f", target.Confidence, w.Confidence)
+			}
+		}
+	}
+	if !found {
+		t.Error("标记位置应出现在 warnings（降级不删除，人工仍可复核）")
 	}
 }

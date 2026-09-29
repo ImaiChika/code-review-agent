@@ -503,7 +503,9 @@ function gaugeHTML(score, grade) {
     </div>`;
 }
 
-function findingHTML(f, idx) {
+function findingHTML(f, idx, taskID) {
+  const fpBtn = taskID ? `<button class="fp-btn" onclick="event.stopPropagation();markFP('${esc(taskID)}','${esc(f.rule_id)}','${esc(f.file)}',${f.line},this)"
+    title="记录后，同类问题在后续审查中自动降级为警告">标记误报</button>` : "";
   return `
   <div class="finding f-${esc(f.severity)}" id="fd-${idx}">
     <div class="finding-head" onclick="document.getElementById('fd-${idx}').classList.toggle('open')">
@@ -516,8 +518,29 @@ function findingHTML(f, idx) {
     <div class="finding-body">
       <pre>${renderEvidence(f.evidence)}</pre>
       <div class="finding-rec"><b>修复建议</b> ${esc(f.recommendation)}</div>
+      <div class="finding-fp">${fpBtn}</div>
     </div>
   </div>`;
+}
+
+/* M8-C9：标记误报（记忆降噪闭环入口） */
+async function markFP(taskID, ruleID, file, line, btn) {
+  btn.disabled = true;
+  btn.textContent = "标记中 …";
+  try {
+    await api(`/api/tasks/${encodeURIComponent(taskID)}/fp-marks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rule_id: ruleID, file: file, line: line }),
+    });
+    btn.textContent = "已标记 ✓";
+    btn.classList.add("done");
+    log(`已标记误报 ${ruleID} ${file}:${line} — 同类问题后续审查自动降级为警告`);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "标记误报";
+    log(`标记失败 — ${e.message}`);
+  }
 }
 
 function renderReviewResult(rep) {
@@ -544,11 +567,11 @@ function renderReviewResult(rep) {
 
     <div style="height:14px"></div>
 
-    ${panel(`发现（${rep.findings.length}）`, rep.findings.length ? rep.findings.map(findingHTML).join("") : `<div class="empty">未发现问题</div>`,
+    ${panel(`发现（${rep.findings.length}）`, rep.findings.length ? rep.findings.map(f => findingHTML(f, rep.findings.indexOf(f), rep.task_id)).join("") : `<div class="empty">未发现问题</div>`,
       "高置信度（≥0.7）的问题。点击行展开代码证据与修复建议")}
 
     ${rep.warnings.length ? `<div style="height:14px"></div>
-    ${panel(`警告（${rep.warnings.length}）`, rep.warnings.map(findingHTML).join(""),
+    ${panel(`警告（${rep.warnings.length}）`, rep.warnings.map(f => findingHTML(f, rep.warnings.indexOf(f), rep.task_id)).join(""),
       "置信度低于 0.7 的疑似问题，需人工复核")}` : ""}
   </div>`;
 }
@@ -690,7 +713,7 @@ function renderFindings() {
   else if (taskSevFilter === "warning") list = rep.warnings;
   else list = rep.findings.filter(f => f.severity === taskSevFilter);
 
-  wrap.innerHTML = list.length ? list.map(findingHTML).join("")
+  wrap.innerHTML = list.length ? list.map(f => findingHTML(f, list.indexOf(f), window._currentTask.d.task.task_id)).join("")
     : `<div class="empty">该筛选下没有条目</div>`;
 }
 
