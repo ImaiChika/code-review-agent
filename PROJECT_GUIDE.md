@@ -27,7 +27,7 @@
 > 这一节不讲原理，只讲**怎么用**。不需要会编程、不需要懂命令行，照着做就行。
 > 后面的章节是给开发者看的，普通用户看完这一节就可以关掉文档去用了。
 >
-> 📌 **这是活文档**：界面或功能有变化时，请随手更新这一节，保持它和真实界面一致（最后核对：2026-09-29，v1.2.0-dev 界面实测）。
+> 📌 **这是活文档**：界面或功能有变化时，请随手更新这一节，保持它和真实界面一致（最后核对：2026-09-30，v1.2.0-dev 界面实测，含树状导航与设置中心）。
 
 ### 0.1 这个工具是干嘛的？
 
@@ -49,9 +49,9 @@
 
 ### 0.3 五分钟跑通第一次审查（新手照做）
 
-1. 打开网页，左侧点 **「02 新建审查」**。
+1. 打开网页，左侧导航点 **「02 审查中心」** 展开菜单，再点 **「新建审查」**。
 2. 页面中间有一排灰色小方块（示例），随便点一个，比如 `security_issue.diff`——它会自动把示例填进输入框，不用你打字。
-3. 点右下角 **「执行审查」** 按钮。
+3. 点 **「执行审查」** 按钮。
 4. 等一两秒，下方出现结果：一个风险分数和问题列表。
 5. 点任何一条问题，它会展开：**证据**（它在代码里看到的原话，涉及密码的会自动打码成 `***REDACTED***`）和**修复建议**（照着改就行）。
 
@@ -87,7 +87,7 @@
 - **下次**再审查同样的代码，这个位置不会再报"高危"，只会放进"警告"里轻轻提醒；
 - 这是**会记住的**——标一次，以后每次都安静。它还会举一反三：同一个文件里同类问题也会一并降级。
 
-注意：目前撤销标记需要管理员在服务器上操作（调用 `DELETE /api/fp-marks` 接口），界面上还没有"撤销"按钮，标之前想清楚。
+注意：标错了想反悔？左侧 **「03 智能与配置 → 误报记忆」** 里能看到所有已标记的记录，点「撤销」即恢复正常上报。
 
 ### 0.7 把报告发给别人看
 
@@ -115,6 +115,24 @@
 ### 0.10 给部署管理员的一句话
 
 对外（公网）提供服务前，请务必：设置 `AUTH_TOKEN`（写操作要凭证）、配置 `ALLOW_REPOS` 白名单（只允许访问指定目录的仓库）、前面套一层 HTTPS 反向代理。具体命令见 README.md 的「Docker 部署」一节。
+
+### 0.11 想让 AI 帮忙复核？（配置自己的模型，可选）
+
+系统内置的规则审查**不需要任何 AI、不花一分钱**。如果你想再让大模型把可疑问题复核一遍、生成更具体的修复建议，需要配置一次模型：
+
+1. 左侧 **「03 智能与配置」→「模型与密钥」**。
+2. 选服务商（如"通义千问 · 阿里云百炼"），Base URL 会自动填好。
+3. 填模型名（如 `qwen3.8-flash`）和你的 API Key，点 **「保存设置」**。
+4. 点 **「测试连接」**——只花 1 个 token，显示"✓ 连接成功"就配好了。
+
+配好之后，到"新建审查"页勾选 **「LLM 复核降噪」** 才会用 AI。**不勾就不花钱**，审查结果和以前完全一样。
+
+**关于花钱，只需要记住三条**：
+- 复核开关默认关闭，每次审查手动勾选；
+- 一次复核把所有候选问题打包成一次请求，通常只花几百 token（flash 级模型约几厘钱）；
+- 密钥保存在服务器本机数据库里，界面上永远只显示尾号（如 `…msNw`），别人看不到完整 key。
+
+E2B 云沙箱的 API Key 也在同一页配置（想让"仓库路径"审查跑在云端沙箱时用）。
 
 ---
 
@@ -225,7 +243,7 @@ PORT=9090 scripts/start.sh   # 自定义端口
 ```
 
 - **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
-- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`。
+- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**；**M8-设置中心起支持 `sandbox_backend`（local/container/container-fx/e2b）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护；`?llm_mode=` 查询参数开复核）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`、**M8-设置中心**：`GET/POST /api/settings`（LLM/E2B 运行时配置，GET 公开但密钥只回尾号提示，POST 受认证）、`POST /api/settings/test`（最小连通性测试，max_tokens=1，常见错误映射为用户可读提示）、`GET/DELETE /api/fp-marks`（误报记忆管理）。
 - **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
 - **异步队列（M7-F1）**：`server/queue.go` worker 池（`--queue-workers`，默认 1 串行=SQLite 单写最稳，HTTP 已不被彼此阻塞）；单任务看门狗 `--task-timeout`（默认 10m，超时标 failed 并经 `CreateFailedTask` 补记 DB）；进行中状态在内存注册表（服务重启丢失未完成任务属预期）；runFn 可注入支撑状态机单测；runFn panic 被兜住不影响服务。
 - **认证与边界（M7-F2）**：`server/auth.go`——`--auth-token` 启用写保护（读公开，前端 `?token=<token>` 链接自动保存）；IP 令牌桶限流（2 req/s burst 10）只包提交端点；请求体 ≤10MB（413）；安全响应头 + 连接层超时。全部默认关闭/宽松，不改变旧行为。
@@ -542,7 +560,7 @@ rules:
 > `M0（✅ 已完成）` → **`M6-Part1（✅ 本次提前完成：REST API + 内嵌 Web SPA + 一键启停脚本）`** → `M1 框架真接入（顺延）` → `M2 数据集 v1` → `M3 沙箱生产化` → `M4 Agent 升级` → `M5 服务化与 v1.0`。
 > 里程碑编号不变，M6 剩余部分（React 重构、趋势看板深化、规则编辑器）回归 M5 之后的 v1.1 backlog。
 
-#### M0 · 修复与质量门禁（2026-09-24 → 09-30，约 6h）✅ 已完成（2026-09-25，代码与测试全部落地，提交后按 §7.7 打 tag `v0.2.0`）
+#### M0 · 修复与质量门禁（2026-09-24 → 09-30，约 6h）✅ 已完成（2026-09-25，代码与测试全部落地，提交后按 §7.8 打 tag `v0.2.0`）
 
 | 任务 | 产出 |
 |------|------|
@@ -576,7 +594,7 @@ rules:
 > - ✅ **B5 完成（2026-09-25）**：新增 `review/artifact.go`——`collectArtifacts()` 收集报告 JSON/MD + 沙箱输出（审计日志独立落盘不入库），`saveArtifacts()` 写 `cr_artifacts` 并强制三重限制：单任务 ≤20 个、单产物 ≤1MB、扩展名白名单（.json/.md/.log/.txt），被拒产物记录原因。`report.MonitorInfo` 新增 `artifacts_saved` / `artifacts_rejected` 计数。测试：`review/artifact_test.go` 6 用例（正常入库 / 扩展名拒 / 大小拒 / 数量拒 / 收集逻辑 / 端到端入库 + 计数一致）。**执行中发现并修复时序 bug**：报告文件先落盘、产物计数后产生，导致报告内计数恒为 0——重构 Step 6/7 为"先入库产物 → 更新计数 → 重新序列化写文件/落库"（E2E 复验 saved=3/rejected=0）。
 > - ✅ **B6 完成（2026-09-25）**：`review.Run` 主流程接入 OTel——`tracer()` 动态解析全局 TracerProvider（默认 noop 零开销；框架 `telemetry/trace.Start()` 设置 provider 后 span 自动进入导出管线，`OTEL_EXPORTER_OTLP_ENDPOINT` 配置端点）。主 span `review.run` 属性：`review.task_id / input_type / files_scanned / rules / findings_raw / findings_total / warnings_total / risk_score / risk_grade`，失败路径 `RecordError + Error 状态`；每条沙箱命令子 span `sandbox.exec` 属性：`sandbox.command / backend / exit_code / timed_out / tool.safety.decision`。`go.mod` 新增直接依赖 otel / otel-trace。测试：`review/otel_test.go` 3 用例（SDK tracetest 注入 provider 采集 span：主 span 属性 / 沙箱子 span 决策与退出码 / 失败状态）。
 >
-> **✅ M1 退出标准验证（2026-09-25，E2E 实测）**：① 报告含 skill 元数据（`skill: code-review 1.0.0 loaded=true`）；② 权限决策经框架 policy（`policy.CheckToolPermission`）且落库可查（`cr_permission_decisions`：allow + 白名单原因）；③ artifact 表有记录且超限被拒（`cr_artifacts` 3 条/任务，三重限制单测覆盖）。M1 完成，可打 tag `v0.3.0`（§7.7）。
+> **✅ M1 退出标准验证（2026-09-25，E2E 实测）**：① 报告含 skill 元数据（`skill: code-review 1.0.0 loaded=true`）；② 权限决策经框架 policy（`policy.CheckToolPermission`）且落库可查（`cr_permission_decisions`：allow + 白名单原因）；③ artifact 表有记录且超限被拒（`cr_artifacts` 3 条/任务，三重限制单测覆盖）。M1 完成，可打 tag `v0.3.0`（§7.8）。
 
 #### M2 · 数据集 v1 + 规则深化（原计划 2026-10-16 → 10-29，约 20h）✅ 已完成（2026-09-27 提前，进度见下方执行记录）
 
@@ -728,6 +746,8 @@ rules:
 > - ✅ **C3 LLM 修复建议完成（2026-09-29，M8 首项）**：`llmreview/suggest.go` 新增 `Suggest()`——建议轮协议 `序号. 一行建议`（`suggestRe` 解析，首匹配优先，越界/空行忽略；`oneLine` 单行压缩防注入），prompt 携带规则/定位/脱敏证据/现有建议，并**要求每条建议独立完整、禁止"同上"引用**（单测抓到的真实 UX 缺口：建议在前端逐条独立展示，引用式建议脱离上下文不可读）。管线新增 **Step 4.6**（复核后、评分前）：`Recommendation` 替换为 LLM 文案并经 `safety.MaskSensitiveInfo` 兜底脱敏（LLM 文本是新的文本入口，与 finding 出口同一纪律），`Monitor.LLMSuggested` 计数；缺失/失败保守保留静态建议。FakeModel **轮次区分**：复核轮（默认全 CONFIRM，M4 语义不变）/ 建议轮（prompt 含"修复顾问"标记，默认回放**空响应** → 静态建议保留、确定性可复现；显式 Push 两段响应验证替换）。前端/HTML 报告/落库零改动（渲染的就是 recommendation）。测试：llmreview +6（解析/缺失保留/失败保留/越界/单行折叠/轮次互不串扰）、review 管线 +2（两段响应替换成功+脱敏 / 默认建议轮 recall 不降）；全量 13 包 `-race` 全绿、数据集门禁不回退。实机：`--fake-model` 全链路 `llm_suggested=0`（默认空建议轮，确定性）。（注：原文误记"14 包"，实际 13 包，已更正。）
 > - ✅ **C9 误报标记记忆降噪完成（2026-09-29）**：闭环 = 前端 finding 展开"标记误报"→ `POST /api/tasks/{id}/fp-marks` 落 `cr_false_positive_marks` → 后续审查 Step 3.9（去重前）对同模式降置信度（精确 rule+file+line ×0.5；文件级 rule+file ×0.6 容忍行号漂移）→ 低于 0.7 阈值自动进 warnings 桶（降级不删除，人工仍可看到）；`GET /api/fp-marks` 列表 + `DELETE ?id=` 撤销（恢复上报；写语义受认证）。**设计决策**：v1 用自建表 + 内存匹配（marks 规模=人工标记数，全量拉取零成本），`memory/sqlitevec` 向量化相似匹配留 backlog（跨文件模式归纳）；**dry-run 不读库**（回归测试 TestRun_DiffFileDryRun 守护——不读也不创建库文件）。修掉两个实现 bug：ServeMux 重复注册 `/api/tasks/` panic（GET 详情与 POST 标记合并为 handleTaskRoutes 方法分派）、fpMarks DELETE 认证条件写反（无 token 实例被误拒 401）。测试：storage CRUD +1、管线闭环 +1（标记→同位置出 findings 消失/入 warnings 且 conf<0.7、撤销恢复）、server API +2（生命周期/认证）；全量 13 包 `-race` 全绿、数据集门禁不回退。**实机闭环**：首审 2 findings → 标记 line:3 → 重审该行 0.9→0.45 入 warnings（相邻行不受影响）→ 撤销 → 恢复 2 findings 0 warnings；浏览器按钮"标记误报→已标记 ✓"验证 + 截图视觉验收。
 > - 🧪 **M8 中期全量回归测试（2026-09-29，对照 C3/C9 完成后的现状）**：按本文档 §二 流程逐层实测——① 静态门禁：build / vet / gofmt / 13 包 `-race` / 数据集门禁（39 样本 100%/100%/0%、脱敏 0 泄漏）全绿；② CLI：diff-file / dry-run / `--files` / `--fake-model` / repo-path+local 沙箱（go vet/test 真跑、staticcheck 未装优雅记录）/ 三类错误路径 exit code 语义正确；③ API 全端点：202 异步、422（纯上下文）、400（空 body/坏 repo）、上传多文件+zip 穿越拒绝、真实 GitHub PR（octocat/Hello-World#1）、fp-marks 标记→降级（0.9→0.45）→撤销→恢复闭环、stats/trend 准确；④ 安全边界：401/双 token 头/读公开/限流 10+429(Retry-After)/10MB+413/白名单内外+穿越+相似前缀 403；⑤ 前端浏览器走查（新用户视角）：四视图、5 输入 tab 全部实测、token 链接自动保存并清地址栏、HTML 报告新标签打开、脱敏展示（REDACTED）、布局程序化审计（无溢出/重叠/截断）；⑥ MCP stdio：initialize/tools/code_review（检出密钥）/list 全通。**发现并修复 4 项**：verbose 双重汇总输出（删 Step 8 重复块）、Version 停留 1.0.0（→1.2.0-dev）、P3-13 completed_at/duration 落库（+回归测试）、任务详情"全部"筛选不含警告（只警告任务显示为空，现合并显示并带"警告"徽章）。修后 13 包 `-race` 全绿、数据集门禁不回退、实机逐项复验。环境备注：本会话模型与视觉评审通道均不支持图片输入，视觉验收改为 DOM 断言+布局几何审计+截图存档（`t01`~`t07`）。
+> - ✅ **E6/E7 设置中心 + 树状导航完成（2026-09-30，用户插入需求）**：① **设置中心**——`cr_settings` KV 表（storage +4 方法）；`GET/POST /api/settings`（同 pattern 合并注册防 ServeMux panic，GET 公开但**密钥永不回明文**只回尾号提示，POST `"-"` 语义清除）；`POST /api/settings/test`（max_tokens=1 真实连通性测试，401/403/404/429/超时/不可达全部映射用户可读提示，额外包 IP 限流）；`review.Options` 新增 `LLMAPIKey`/`E2BAPIKey`（设置中心 > 环境变量），`buildLLMModel` 与 E2B 沙箱构造同步改造；`POST /api/reviews` 新增 `sandbox_backend` 白名单校验（e2b 无 key 时 400 + 引导提示，不静默回退）。② **前端**——侧栏改两级树状导航（总览看板 / 审查中心→新建审查+任务记录 / 智能与配置→模型与密钥+误报记忆 / 规则引擎；展开态 localStorage 持久化 + 激活路径追踪）；「模型与密钥」视图（服务商选择自动填 Base URL、脱敏徽章、清除、测试连接按钮、安全与成本说明面板）；「误报记忆」管理页（列表/撤销闭环 C9）；审查表单 LLM 复核开关（默认关）与沙箱后端下拉（e2b 未配置置灰）。③ **可观测**——`Monitor.LLMError` 字段，LLM 调用失败时前端橙条提示"已保留规则结果"并引导去设置页。测试：storage +1、server +3（脱敏/清除/错误映射/e2b 预检）；13 包 `-race` 全绿。**实机验证（真实 qwen3.8-flash）**：测试连接 ✓（1 token，3.1s）；一次示例审查 LLM 复核端到端 ✓（送审 2 · 剔除 0 · 建议 2，LLM 建议为针对性修复文案）；坏 key→401 提示、坏模型名→404 提示、坏模型名下审查→橙色降级警告条。**过程中抓到并修复**：viewFPMarks 模板误用逗号运算符导致首个 panel 被丢弃（快照验证发现）。
+> - 📌 **LLM 成本纪律（2026-09-30 起生效，详见 §7.6）**：API Key 配置后所有 LLM 用量须按最低成本原则执行。
 > - ⏭ 下一步：D3 go/types 类型增强（repo 模式加载类型信息，RES/ERR 规则从"猜"变"知道"）。
 
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
@@ -798,6 +818,8 @@ rules:
 | E3 | 趋势统计 API → M7-F5 | 按天聚合任务数、评分分布、规则命中 TopN（SQL 聚合，顺带修 P2-11） | S |
 | E4 | 规则管理 API | 规则列表 / YAML 校验 / 单 diff 试跑 | M |
 | E5 | 部署形态 → M7-F7 | 单二进制内嵌前端（✅ 已实现）；Docker compose（服务 + 数据卷）+ TLS 反代与备份文档 | S |
+| E6 | 设置中心（模型与密钥）✅（2026-09-30，M8 插入） | `cr_settings` KV 表 + `GET/POST /api/settings`（密钥只回尾号提示，"-" 清除）+ `POST /api/settings/test`（max_tokens=1 连通性测试，401/404/429/超时映射用户可读提示）；运行时注入 `review.Options.LLMAPIKey/E2BAPIKey`（设置中心 > 环境变量）；前端「模型与密钥」视图含安全/成本说明 | M |
+| E7 | 树状导航 + 误报记忆管理页 ✅（2026-09-30，M8 插入） | 侧栏两级分组（总览看板 / 审查中心 / 智能与配置 / 规则引擎），展开状态 localStorage 持久化 + 激活路径追踪；新增「误报记忆」视图（列表/撤销，闭环 C9）；审查表单 LLM 复核开关（默认关）与沙箱后端下拉 | M |
 
 #### F 层：上线运营（M7 主战场，2026-09-28 规划）
 
@@ -847,7 +869,24 @@ rules:
 
 更新方法：跑 `go test -run TestDataset -v .`，把"数据集质量报告"数字填入"当前实际"列。
 
-### 7.6 风险与对策
+### 7.6 LLM 成本纪律（2026-09-30 起，API Key 管理指引）
+
+> 用户接入真实 LLM（千问/OpenAI/ollama 等）后，所有 token 消耗遵循**最低成本原则**。这是纪律不是建议。
+
+| 规则 | 内容 |
+|------|------|
+| 1. 默认关闭 | LLM 复核/建议只随 `--llm`/前端勾选启用；纯规则行为（数据集门禁基线）永不消耗 token |
+| 2. 批量单请求 | 复核把全部候选打包一次请求（llmreview 既有设计），禁止逐条请求的实现在管线出现 |
+| 3. 候选上限 | 送审候选即去重后 findings，天然受限；新增 LLM 消耗点时必须带单次上限（如 ≤50 候选） |
+| 4. 最小 max_tokens | 连通性测试固定 `max_tokens=1`；新功能能用小输出就不用大输出 |
+| 5. 小模型优先 | 复核/建议用 flash/mini 级模型（如 qwen3.8-flash / gpt-4o-mini），大模型仅在对照实验时临时用 |
+| 6. 实验先报价 | 跑数据集级 LLM 对照（TestDatasetLLMComparison 等）前先估算 token 量，> 1 万 token 需用户确认 |
+| 7. 失败即止损 | LLM 失败保守保留规则结果（既有语义），禁止自动重试消耗 |
+| 8. 用量可见 | Monitor 记录 llm_reviewed/dropped/suggested；引入计费 API 后在设置页展示累计消耗 |
+
+**测试场景的成本参考**（qwen3.8-flash，2026-09-30 实测）：连通性测试 ≈1 token/次；一次 2 候选复核+建议 ≈ 几百 token。禁止行为：在 web 界面循环提交审查刷 LLM、把数据集全量跑 LLM 当日常回归、把用户 key 用于本工具之外的任何用途。
+
+### 7.7 风险与对策
 
 | 风险 | 对策 |
 |------|------|
@@ -856,8 +895,9 @@ rules:
 | E2B/LLM 外部依赖不可用 | E2B 无 key 自动 skip 集成；LLM 用 fake-model 和 ollama 本地兜底 |
 | CI 环境 CGO（go-sqlite3） | 先用 ubuntu runner + clang；M3 评估 modernc.org/sqlite 纯 Go 替换 |
 | 框架版本升级破坏 API | go.mod 锁定 minor 版本；升级在独立分支跑全量门禁后再合 |
+| API Key 泄露/滥用（2026-09-30 新增） | 密钥只存本机 DB、接口只回尾号、日志不打印；公网部署必须开 AUTH_TOKEN；泄露时先在服务商吊销再清除设置 |
 
-### 7.7 节奏约定
+### 7.8 节奏约定
 
 1. **门禁纪律**：数据集门禁红了不合代码；新增/修改规则必须带正负样本。
 2. **提交纪律**：一个任务一个提交，message 引用任务编号（如 `fix(A1): unify evidence redaction`）。格式为 Conventional Commits（`type(scope): subject`，type ∈ feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert），由 `scripts/hooks/commit-msg`（本地，`bash scripts/install-hooks.sh` 一键安装）与 CI `commit-check` job（远端）双层强制。
