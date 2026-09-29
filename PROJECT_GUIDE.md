@@ -624,6 +624,11 @@ rules:
 
 **退出标准**：数据集 v2 ≥ 50 样本（含跨函数 hard 批次，标注先于实现），recall ≥ 85% 且 precision ≥ 92%；误报标记 → 降置信度闭环可演示；LLM 建议在 fake 模式下可复现；全量门禁不回退。
 
+> **📋 M8 执行进度记录（2026-09-29 起执行，每完成一项在此登记）**
+>
+> - ✅ **C3 LLM 修复建议完成（2026-09-29，M8 首项）**：`llmreview/suggest.go` 新增 `Suggest()`——建议轮协议 `序号. 一行建议`（`suggestRe` 解析，首匹配优先，越界/空行忽略；`oneLine` 单行压缩防注入），prompt 携带规则/定位/脱敏证据/现有建议，并**要求每条建议独立完整、禁止"同上"引用**（单测抓到的真实 UX 缺口：建议在前端逐条独立展示，引用式建议脱离上下文不可读）。管线新增 **Step 4.6**（复核后、评分前）：`Recommendation` 替换为 LLM 文案并经 `safety.MaskSensitiveInfo` 兜底脱敏（LLM 文本是新的文本入口，与 finding 出口同一纪律），`Monitor.LLMSuggested` 计数；缺失/失败保守保留静态建议。FakeModel **轮次区分**：复核轮（默认全 CONFIRM，M4 语义不变）/ 建议轮（prompt 含"修复顾问"标记，默认回放**空响应** → 静态建议保留、确定性可复现；显式 Push 两段响应验证替换）。前端/HTML 报告/落库零改动（渲染的就是 recommendation）。测试：llmreview +6（解析/缺失保留/失败保留/越界/单行折叠/轮次互不串扰）、review 管线 +2（两段响应替换成功+脱敏 / 默认建议轮 recall 不降）；全量 14 包 `-race` 全绿、数据集门禁不回退。实机：`--fake-model` 全链路 `llm_suggested=0`（默认空建议轮，确定性）。
+> - ⏭ 下一步：C9 误报标记记忆降噪（前端"标记误报"→落库→同模式降置信度闭环）。
+
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
 ### 7.3 扩展任务明细（A/B/C/D 层完整任务库）
