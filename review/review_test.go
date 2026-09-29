@@ -176,6 +176,37 @@ func TestRun_DiffContent(t *testing.T) {
 	}
 }
 
+// TestRun_TaskRowCompletionMetadata 验证任务行的 completed_at/duration 被填充
+// （P3-13 修复：此前主流程只写 status=completed，前端任务详情"结束"列恒为空）。
+func TestRun_TaskRowCompletionMetadata(t *testing.T) {
+	outDir := t.TempDir()
+	dbPath := filepath.Join(outDir, "review.db")
+	rep, err := Run(Options{
+		DiffContent: "--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,2 @@\n package a\n+var x = 1\n",
+		OutputDir:   outDir,
+		DBPath:      dbPath,
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("打开数据库失败: %v", err)
+	}
+	defer store.Close()
+	task, err := store.GetTask(rep.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask 失败: %v", err)
+	}
+	if task.CompletedAt == nil {
+		t.Error("completed_at 未填充：任务详情\"结束\"列将为空")
+	}
+	if task.Duration == "" {
+		t.Error("duration 未填充")
+	}
+}
+
 // TestRun_NoChanges 无可审查变更返回 ErrNoChanges。
 func TestRun_NoChanges(t *testing.T) {
 	outDir := t.TempDir()

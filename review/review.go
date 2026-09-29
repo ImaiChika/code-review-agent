@@ -551,6 +551,12 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			return nil, fmt.Errorf("保存报告失败: %w", err)
 		}
 
+		// P3-13：补记完成时间与耗时（UpdateTaskStatus 对 completed 会填充
+		// completed_at/duration，前端任务详情"结束"列由此而来）
+		if err := store.UpdateTaskStatus(taskID, storage.TaskStatusCompleted); err != nil {
+			log.Printf("⚠️ 更新任务完成状态失败: %v", err)
+		}
+
 		if opts.Verbose {
 			fmt.Printf("💾 已保存到数据库: %s (task: %s)\n", opts.DBPath, taskID)
 		}
@@ -565,18 +571,8 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	}
 
 	// ========== Step 8: 汇总 ==========
-	if opts.Verbose {
-		duration := time.Since(start)
-		fmt.Printf("\n✅ 审查完成！耗时: %s\n", duration.Round(time.Millisecond))
-		fmt.Printf("   风险评分: %.0f/100 (%s)\n", riskScore.Score, riskScore.Grade)
-		fmt.Printf("   报告: %s\n", jsonPath)
-		if len(counters.sandboxRuns) > 0 {
-			fmt.Printf("   沙箱执行: %d 次, 耗时 %s\n", len(counters.sandboxRuns), counters.sandboxDuration.Round(time.Millisecond))
-		}
-		if counters.permissionDenied > 0 {
-			fmt.Printf("   权限拦截: %d 次\n", counters.permissionDenied)
-		}
-	}
+	// 汇总输出由调用方负责（CLI 在 main.go 打印含严重度计数的完整摘要），
+	// 管线内不再重复打印"审查完成"，避免 --verbose 下双重输出。
 
 	return reviewReport, nil
 }
