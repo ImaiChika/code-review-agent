@@ -63,6 +63,12 @@ type Store interface {
 	ListFalsePositiveMarks() ([]*FalsePositiveMark, error)
 	DeleteFalsePositiveMark(id int64) error
 
+	// 运行时设置（M8-设置中心：LLM / E2B 配置，value 可能含密钥，外发前必须脱敏）
+	GetSetting(key string) (value string, ok bool, err error)
+	SetSetting(key, value string) error
+	DeleteSetting(key string) error
+	ListSettings() ([]*SettingKV, error)
+
 	// 生命周期
 	Close() error
 }
@@ -112,6 +118,23 @@ type FalsePositiveMark struct {
 	TaskID    string    `json:"task_id"`   // 标记来源任务
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// SettingKV 一条运行时设置（key-value，M8-设置中心）。
+// value 可能是 API Key 等敏感信息：接口层只回传脱敏提示，禁止原样外发。
+type SettingKV struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"-"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// 运行时设置的固定键名（M8-设置中心）。
+const (
+	SettingLLMProvider = "llm_provider" // openai / dashscope / ollama / custom（仅用于前端回显）
+	SettingLLMBaseURL  = "llm_base_url" // OpenAI 兼容端点
+	SettingLLMModel    = "llm_model"    // 模型名
+	SettingLLMAPIKey   = "llm_api_key"  // 敏感
+	SettingE2BAPIKey   = "e2b_api_key"  // 敏感
+)
 
 // TrendStats 趋势聚合（M7-F5，纯 SQL 聚合，任务数无关的 O(1) 响应）。
 type TrendStats struct {
@@ -281,6 +304,11 @@ func (s *SQLiteStore) initTables() error {
 			size INTEGER DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (task_id) REFERENCES cr_review_tasks(task_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS cr_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME NOT NULL
 		)`,
 	}
 
@@ -920,4 +948,53 @@ func (s *SQLiteStore) ListFalsePositiveMarks() ([]*FalsePositiveMark, error) {
 func (s *SQLiteStore) DeleteFalsePositiveMark(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM cr_false_positive_marks WHERE id = ?`, id)
 	return err
+}
+
+// ========== 运行时设置（M8-设置中心） ==========
+
+// GetSetting 读取一条设置。ok=false 表示未设置。
+func (s *SQLiteStore) GetSetting(key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM cr_settings WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
+// SetSetting 写入（upsert）一条设置。
+func (s *SQLiteStore) SetSetting(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO cr_settings (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key, value, time.Now(),
+	)
+	return err
+}
+
+// DeleteSetting 删除一条设置。
+func (s *SQLiteStore) DeleteSetting(key string) error {
+	_, err := s.db.Exec(`DELETE FROM cr_settings WHERE key = ?`, key)
+	return err
+}
+
+// ListSettings 返回全部设置键（value 不填充，避免敏感值扩散；需要值用 GetSetting）。
+func (s *SQLiteStore) ListSettings() ([]*SettingKV, error) {
+	rows, err := s.db.Query(`SELECT key, updated_at FROM cr_settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*SettingKV
+	for rows.Next() {
+		kv := &SettingKV{}
+		if err := rows.Scan(&kv.Key, &kv.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, kv)
+	}
+	return out, rows.Err()
 }

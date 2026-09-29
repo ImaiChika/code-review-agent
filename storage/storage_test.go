@@ -498,3 +498,47 @@ func TestFalsePositiveMarks(t *testing.T) {
 		t.Errorf("删除后应剩 0 项, 得到 %d", len(marks))
 	}
 }
+
+// TestSettingsCRUD 设置中心 KV 表：upsert / 回读 / 删除 / 列表。
+func TestSettingsCRUD(t *testing.T) {
+	store := newTestStore(t)
+
+	// 初始未设置
+	if _, ok, err := store.GetSetting("llm_api_key"); err != nil || ok {
+		t.Fatalf("初始应未设置 (ok=%v, err=%v)", ok, err)
+	}
+
+	// 写入 + 覆盖（upsert）
+	if err := store.SetSetting("llm_api_key", "sk-first"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	if err := store.SetSetting("llm_api_key", "sk-second"); err != nil {
+		t.Fatalf("SetSetting 覆盖: %v", err)
+	}
+	v, ok, err := store.GetSetting("llm_api_key")
+	if err != nil || !ok || v != "sk-second" {
+		t.Fatalf("GetSetting = %q (ok=%v, err=%v), 期望 sk-second", v, ok, err)
+	}
+
+	// ListSettings 只回键不回值（防敏感值扩散）
+	if err := store.SetSetting("llm_model", "qwen3.8-flash"); err != nil {
+		t.Fatalf("SetSetting model: %v", err)
+	}
+	list, err := store.ListSettings()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("ListSettings = %d 项 (err=%v), 期望 2", len(list), err)
+	}
+	for _, kv := range list {
+		if kv.Value != "" {
+			t.Errorf("ListSettings 不应回填 value, key=%s", kv.Key)
+		}
+	}
+
+	// 删除
+	if err := store.DeleteSetting("llm_api_key"); err != nil {
+		t.Fatalf("DeleteSetting: %v", err)
+	}
+	if _, ok, _ := store.GetSetting("llm_api_key"); ok {
+		t.Error("删除后应未设置")
+	}
+}
