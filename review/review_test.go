@@ -553,3 +553,40 @@ func TestRun_FPMemoryDowngrade(t *testing.T) {
 		t.Error("标记位置应出现在 warnings（降级不删除，人工仍可复核）")
 	}
 }
+
+// TestRun_TaskNameAndLLMModel 任务名称落库/进报告，Monitor 记录实际模型名
+// （"openai" 只是协议名，用户关心的是 qwen3.8-flash 这类真实模型）。
+func TestRun_TaskNameAndLLMModel(t *testing.T) {
+	outDir := t.TempDir()
+	dbPath := filepath.Join(outDir, "review.db")
+	rep, err := Run(Options{
+		DiffContent: "--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,3 @@\n package a\n+var password = \"secret-xyz\"\n+var other = 1\n",
+		TaskName:    "登录模块安全检查",
+		LLMMode:     "fake",
+		OutputDir:   outDir,
+		DBPath:      dbPath,
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	if rep.TaskName != "登录模块安全检查" {
+		t.Errorf("报告 TaskName = %q", rep.TaskName)
+	}
+	if rep.Monitor.LLMModel != "fake（确定性回放）" {
+		t.Errorf("Monitor.LLMModel = %q, 期望 fake 标注", rep.Monitor.LLMModel)
+	}
+
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("打开数据库失败: %v", err)
+	}
+	defer store.Close()
+	task, err := store.GetTask(rep.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask 失败: %v", err)
+	}
+	if task.TaskName != "登录模块安全检查" {
+		t.Errorf("任务行 TaskName = %q", task.TaskName)
+	}
+}

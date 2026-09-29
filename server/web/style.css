@@ -435,3 +435,18 @@ a.link:hover { text-decoration: underline; }
 .modal-title { font-size: 15px; color: var(--ink); margin-bottom: 10px; }
 .modal-msg { font-size: 13px; color: var(--ink-2); line-height: 1.8; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* ─── 任务档案：高级审计折叠区 ─── */
+details.adv { margin-top: 4px; }
+details.adv > summary {
+  cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; color: var(--ink-2); background: var(--panel);
+  list-style: none;
+}
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary:hover { color: var(--ink); border-color: var(--line-strong); }
+details.adv .adv-caret { font-family: var(--mono); font-size: 10px; color: var(--ink-dim); transition: transform .18s ease; }
+details.adv[open] .adv-caret { transform: rotate(90deg); }
+details.adv[open] > summary { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }

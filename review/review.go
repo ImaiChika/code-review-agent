@@ -128,6 +128,7 @@ type Options struct {
 	AuditFile        string              // 审计日志路径；空 = 默认 tool_safety_audit.jsonl 落 OutputDir
 	SkillsDir        string              // CR Skill 目录（M1-B1；空 = 自动探测 ./skills，找不到则报告不含 skill 元数据）
 	InputLabel       string              // 输入来源标签（M7-F3；非空时覆盖报告/落库的 input_path，如 PR 链接、上传文件清单）
+	TaskName         string              // 用户可读的任务名称（可空；网页提交时可自定义，任务列表/详情展示）
 	TaskID           string              // 预分配的任务 ID（M7-F1 异步队列用；空 = 自动生成）
 	DryRun           bool                // 不写数据库、不执行沙箱
 	Verbose          bool                // 过程日志打到 stdout
@@ -324,7 +325,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 
 	// ========== Step 4.5: LLM 复核降噪（M4-C1/C2，默认关闭） ==========
 	// 注：报告对象在 Step 6 才创建，复核统计先存局部变量
-	var llmMode string
+	var llmMode, llmModelName string
 	var llmReviewed, llmDropped, llmSuggested int
 	var llmErrMsg string // 复核/建议调用失败原因（前端提示"已保留规则结果"用）
 	if opts.LLMMode != "" {
@@ -334,6 +335,14 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			llmErrMsg = merr.Error()
 			log.Printf("⚠️ LLM 复核未启用: %v", merr)
 		} else {
+			// 记录实际模型名（"openai" 只是协议名，用户关心的是 qwen3.8-flash 这类真实模型）
+			llmModelName = opts.LLMModelName
+			if llmModelName == "" {
+				llmModelName = "gpt-4o-mini"
+			}
+			if opts.LLMMode == "fake" {
+				llmModelName = "fake（确定性回放）"
+			}
 			kept, stats := llmreview.Review(ctx, mdl, dedupResult.Findings)
 			dedupResult.Findings = kept
 			llmReviewed, llmDropped = stats.Reviewed, stats.Dropped
@@ -402,6 +411,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport.Monitor.PermissionDenied = counters.permissionDenied
 	reviewReport.Monitor.ExceptionCount = counters.exceptions
 	reviewReport.Monitor.LLMMode = llmMode
+	reviewReport.Monitor.LLMModel = llmModelName
 	reviewReport.Monitor.LLMReviewed = llmReviewed
 	reviewReport.Monitor.LLMDropped = llmDropped
 	reviewReport.Monitor.LLMSuggested = llmSuggested // M8-C3
@@ -409,6 +419,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport.Monitor.RiskScore = riskScore.Score
 	reviewReport.Monitor.RiskGrade = riskScore.Grade
 	reviewReport.Monitor.RiskBreakdown = riskScore.Breakdown // M7-F6：HTML 报告六维图
+	reviewReport.TaskName = opts.TaskName
 
 	// 填充沙箱执行记录
 	reviewReport.SandboxRuns = make([]report.SandboxRun, len(counters.sandboxRuns))
@@ -499,6 +510,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		task := &storage.ReviewTask{
 			TaskID:       taskID,
 			Status:       storage.TaskStatusCompleted,
+			TaskName:     opts.TaskName,
 			InputType:    inputType,
 			InputPath:    inputPath,
 			FilesCount:   len(files),

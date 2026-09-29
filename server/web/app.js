@@ -205,7 +205,7 @@ async function viewDashboard() {
   const recentRows = (stats.recent_risks || []).map(r => `
     <tr class="rowlink" onclick="location.hash='#/task/${esc(r.task_id)}'">
       <td class="mono dim">${esc(r.task_id)}</td>
-      <td class="dim">${esc((r.input_path || "").split("/").pop())}</td>
+      <td>${r.task_name ? `<b>${esc(r.task_name)}</b>` : `<span class="dim">${esc((r.input_path || "").split("/").pop())}</span>`}</td>
       <td style="text-align:right">${r.risk_score.toFixed(0)}</td>
       <td style="text-align:right">${gradeBadge(r.risk_grade)}</td>
     </tr>`).join("") || `<tr><td colspan="4" class="empty">还没有任务</td></tr>`;
@@ -328,6 +328,11 @@ async function viewReview() {
   <div class="view-enter">
     <h2 class="view-title">新建审查</h2>
 
+    <div class="field">
+      <label>任务名称（可选，方便以后在任务记录里找到它）</label>
+      <input class="in" id="in-task-name" maxlength="80" placeholder="如：登录模块安全检查 / 修复前对比 …">
+    </div>
+
     <div class="tabs">
       <div class="tab on" id="tab-diff" onclick="switchSource('diff')">粘贴 DIFF ${help("unified diff 格式：以 ---/+++ 开头，@@ 标注行号区间，+ 开头为新增行。只审查新增行")}</div>
       <div class="tab" id="tab-code" onclick="switchSource('code')">粘贴代码 ${help("不懂 diff？直接粘贴整个代码文件，全部内容按新增行审查")}</div>
@@ -374,15 +379,17 @@ async function viewReview() {
         <label>仓库路径</label>
         <input class="in" id="in-repo" placeholder="/path/to/repo">
       </div>
-      <div class="field">
-        <label><input type="checkbox" id="cb-sandbox" style="vertical-align:-2px"> 执行沙箱 ${help("在沙箱中对仓库执行 go vet / go test。命令先经权限策略检查，deny/ask 不会执行")}　后端
-          <select class="in" id="sel-sandbox" style="width:auto;padding:2px 6px">
-            <option value="local">本地（local）</option>
-            <option value="container">容器（container）</option>
-            <option value="e2b" disabled>E2B 云沙箱（未配置 Key）</option>
-          </select> ${help("local：服务器本机直接跑（开发用）；container：Docker 隔离（需服务器有 Docker）；e2b：E2B 云端沙箱，需在「智能与配置 → 模型与密钥」配置 API Key，未配置会直接提示")}
-        </label>
-      </div>
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="cb-sandbox" style="vertical-align:-2px"> 执行沙箱 ${help("沙箱会对仓库运行 go vet / go test / staticcheck，相当于让机器帮你编译和测试一遍。每条命令都先经过安全检查并留痕")}　后端
+        <select class="in" id="sel-sandbox" style="width:auto;padding:2px 6px">
+          <option value="local">本地（local）</option>
+          <option value="container">容器（container）</option>
+          <option value="e2b" disabled>E2B 云沙箱（未配置 Key）</option>
+        </select> ${help("local：服务器本机直接跑（开发用）；container：Docker 隔离（需服务器有 Docker）；e2b：E2B 云端沙箱，需在「智能与配置 → 模型与密钥」配置 API Key，未配置会直接提示")}
+      </label>
+      <div class="dim" id="sandbox-hint" style="font-size:12px;margin-top:4px"></div>
     </div>
 
     <div class="field">
@@ -419,6 +426,19 @@ function switchSource(src) {
     if (tab) tab.classList.toggle("on", s === src);
     if (box) box.style.display = s === src ? "" : "none";
   }
+  // 沙箱只有仓库模式能跑：其他输入只有变更片段、没有完整工程，跑不了 go vet / go test
+  const cb = document.getElementById("cb-sandbox");
+  const hint = document.getElementById("sandbox-hint");
+  const isRepo = src === "repo";
+  if (cb) {
+    cb.disabled = !isRepo;
+    if (!isRepo) cb.checked = false;
+  }
+  if (hint) {
+    hint.textContent = isRepo
+      ? "将在沙箱中运行 go vet / go test / staticcheck，并给出每条命令的执行记录"
+      : "沙箱仅在「仓库路径」模式下可用：粘贴 / 上传 / PR 只有变更片段，没有完整工程，无法运行 go vet / go test";
+  }
 }
 
 function loadSample(i) {
@@ -435,6 +455,9 @@ async function submitReview() {
   // M8-设置中心：LLM 复核开关（默认关闭，控成本——开启才带 llm_mode）
   const llmOn = !!(document.getElementById("cb-llm") && document.getElementById("cb-llm").checked);
   const llmField = () => llmOn ? { llm_mode: "openai" } : {};
+  // 任务名称（可选）：任务列表/详情用它，不填回退显示输入来源
+  const taskName = (document.getElementById("in-task-name").value || "").trim();
+  const nameField = () => taskName ? { task_name: taskName } : {};
   let submit; // () => Promise<{task_id,status}>
 
   if (reviewSource === "diff") {
@@ -443,7 +466,7 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ diff_content: diffText }, llmField())),
+      body: JSON.stringify(Object.assign({ diff_content: diffText }, llmField(), nameField())),
     });
   } else if (reviewSource === "code") {
     // M7-F3：粘贴整文件 → files_content
@@ -453,7 +476,7 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ files_content: { [name]: content } }, llmField())),
+      body: JSON.stringify(Object.assign({ files_content: { [name]: content } }, llmField(), nameField())),
     });
   } else if (reviewSource === "upload") {
     // M7-F3：multipart 上传（多文件或 zip）；LLM 开关走查询参数（multipart 无 JSON body）
@@ -461,7 +484,10 @@ async function submitReview() {
     if (!input.files || !input.files.length) { log("请选择要上传的文件"); return; }
     const fd = new FormData();
     for (const f of input.files) fd.append("files", f, f.name);
-    submit = () => api("/api/reviews/upload" + (llmOn ? "?llm_mode=openai" : ""), { method: "POST", body: fd });
+    const qs = [];
+    if (llmOn) qs.push("llm_mode=openai");
+    if (taskName) qs.push("task_name=" + encodeURIComponent(taskName));
+    submit = () => api("/api/reviews/upload" + (qs.length ? "?" + qs.join("&") : ""), { method: "POST", body: fd });
   } else if (reviewSource === "pr") {
     // M7-F3：GitHub PR 链接
     const prURL = document.getElementById("in-pr").value.trim();
@@ -469,7 +495,7 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ pr_url: prURL }, llmField())),
+      body: JSON.stringify(Object.assign({ pr_url: prURL }, llmField(), nameField())),
     });
   } else {
     const repoPath = document.getElementById("in-repo").value.trim();
@@ -484,7 +510,7 @@ async function submitReview() {
     submit = () => api("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ repo_path: repoPath, sandbox, sandbox_backend: backend }, llmField())),
+      body: JSON.stringify(Object.assign({ repo_path: repoPath, sandbox, sandbox_backend: backend }, llmField(), nameField())),
     });
   }
 
@@ -628,7 +654,9 @@ function renderReviewResult(rep) {
   // M8-设置中心：LLM 复核状态行（失败时黄条提示"已保留规则结果"）
   let llmLine = "";
   if (m.llm_mode) {
-    llmLine = `<span class="k">LLM 复核</span><span class="v">${esc(m.llm_mode)} · 送审 ${m.llm_reviewed} · 剔除 ${m.llm_dropped}` +
+    // "openai" 只是协议名，用户关心的是实际模型（qwen3.8-flash 等）
+    const llmLabel = m.llm_model || m.llm_mode;
+    llmLine = `<span class="k">LLM 复核</span><span class="v"><b>${esc(llmLabel)}</b> · 送审 ${m.llm_reviewed} · 剔除 ${m.llm_dropped}` +
       (m.llm_suggested !== undefined ? ` · 建议 ${m.llm_suggested}` : "") + `</span>`;
   }
 
@@ -666,7 +694,7 @@ async function viewTasks() {
       <td class="mono">${esc(t.task_id)}</td>
       <td class="dim">${fmtTime(t.started_at)}</td>
       <td><span class="badge info">${esc(t.input_type)}</span></td>
-      <td class="dim">${esc(t.input_path)}</td>
+      <td>${t.task_name ? `<b>${esc(t.task_name)}</b> <span class="dim" style="font-size:11px">${esc(t.input_path)}</span>` : `<span class="dim">${esc(t.input_path)}</span>`}</td>
       <td style="text-align:right">${t.files_count}</td>
       <td style="text-align:right">${t.go_files_count}</td>
       <td class="dim">${esc(t.status)}</td>
@@ -676,7 +704,7 @@ async function viewTasks() {
   <div class="view-enter">
     <h2 class="view-title">任务记录</h2>
     ${panel(`任务（${data.count}）`, `<table class="t">
-      <thead><tr><th>TASK ID</th><th>时间</th><th>类型</th><th>输入</th>
+      <thead><tr><th>TASK ID</th><th>时间</th><th>类型</th><th>名称 / 输入</th>
         <th style="text-align:right">文件</th><th style="text-align:right">GO</th><th>状态</th></tr></thead>
       <tbody>${rows}</tbody></table>`)}
   </div>`;
@@ -717,17 +745,21 @@ async function viewTask(taskID) {
   taskSevFilter = "all";
   window._currentTask = { d, rep };
 
+  // 沙箱没跑时给出人话原因（输入类型决定能不能跑）
+  const sandboxEmptyReason = rep.input_type === "repo_path"
+    ? "本次提交没有勾选「执行沙箱」——勾选后会在沙箱里运行 go vet / go test 并给出记录"
+    : "沙箱仅在「仓库路径」模式下可用：本次输入（" + (rep.input_type === "pr_url" ? "GitHub PR" : rep.input_type === "file_contents" || rep.input_type === "upload" ? "粘贴/上传的文件" : "粘贴的 diff") + "）只有变更片段、没有完整工程，无法运行 go vet / go test。需要沙箱时请用仓库路径模式提交";
   const sandboxRows = (d.sandbox_runs || []).map(r => `
     <tr><td class="mono dim">${esc(r.command)}</td><td>${esc(r.backend)}</td>
     <td>${r.exit_code === 0 ? '<span class="badge allow">exit 0</span>' : `<span class="badge deny">exit ${r.exit_code}</span>`}</td>
     <td class="dim">${esc(r.duration)}</td></tr>`).join("") ||
-    `<tr><td colspan="4" class="empty">本任务未执行沙箱</td></tr>`;
+    `<tr><td colspan="4" class="empty">${sandboxEmptyReason}</td></tr>`;
 
   const permRows = (d.permission_decisions || []).map(p => `
     <tr><td class="mono dim">${esc(p.command)}</td>
     <td><span class="badge ${esc(p.action)}">${esc(p.action)}</span></td>
     <td class="dim">${esc(p.reason)}</td></tr>`).join("") ||
-    `<tr><td colspan="3" class="empty">无权限决策记录</td></tr>`;
+    `<tr><td colspan="3" class="empty">本任务没有需要审批的沙箱命令</td></tr>`;
 
   const skillLine = rep.skill && rep.skill.loaded
     ? `<span class="k">Skill</span><span class="v mono">${esc(rep.skill.name)} ${esc(rep.skill.version)}</span>`
@@ -737,6 +769,7 @@ async function viewTask(taskID) {
   <div class="view-enter">
     <h2 class="view-title">任务档案</h2>
     <div class="kv" style="margin-bottom:16px">
+      ${rep.task_name ? `<span class="k">名称</span><span class="v" style="font-weight:600">${esc(rep.task_name)}</span>` : ""}
       <span class="k">任务</span><span class="v mono">${esc(rep.task_id)} · ${esc(rep.input_type)} · ${esc(rep.input_path)} · ${fmtTime(rep.start_time)} → ${esc(rep.duration)} ·
         <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report">下载报告</a> ·
         <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report?format=html" target="_blank">HTML 报告 ${help("新窗口打开自包含 HTML 报告，可直接另存/转发，离线可读")}</a></span>
@@ -759,26 +792,34 @@ async function viewTask(taskID) {
 
     <div style="height:14px"></div>
 
-    <div class="grid grid-2">
-      ${panel("沙箱执行", `<table class="t"><thead><tr><th>命令</th><th>后端</th><th>结果</th><th>耗时</th></tr></thead><tbody>${sandboxRows}</tbody></table>`,
-        "仅仓库模式且未关闭沙箱时执行 go vet / go test")}
-      ${panel("权限决策", `<table class="t"><thead><tr><th>命令</th><th>决策</th><th>原因</th></tr></thead><tbody>${permRows}</tbody></table>`,
-        "allow=允许执行，deny=拒绝，ask=需人工确认；deny/ask 的命令不会进入沙箱")}
-      ${panel("监控", `<div class="kv">
-        <span class="k">工具调用</span><span class="v">${m.tool_call_count} 次</span>
-        <span class="k">规则</span><span class="v">${m.rule_count} 条 · ${esc(m.rule_duration)}</span>
-        <span class="k">扫描文件</span><span class="v">${m.files_scanned} 个</span>
-        <span class="k">产物</span><span class="v">入库 ${m.artifacts_saved} · 被拒 ${m.artifacts_rejected}</span>
-        <span class="k">权限拦截</span><span class="v">${m.permission_denied} 次 · 异常 ${m.exception_count} 次</span>
-      </div>`)}
-      ${panel("任务元数据", `<div class="kv">
-        <span class="k">状态</span><span class="v">${esc(d.task.status)}</span>
-        <span class="k">文件</span><span class="v">${d.task.files_count}（Go ${d.task.go_files_count}）</span>
-        <span class="k">开始</span><span class="v">${fmtTime(d.task.started_at)}</span>
-        <span class="k">结束</span><span class="v">${fmtTime(d.task.completed_at)}</span>
-        <span class="k">结果</span><span class="v">${rep.summary.total_findings} 发现 + ${rep.summary.total_warnings} 警告 · 去重移除 ${rep.summary.dedup_removed}</span>
-      </div>`)}
-    </div>
+    <div style="height:14px"></div>
+
+    ${panel("沙箱执行（go vet / go test）", d.sandbox_runs && d.sandbox_runs.length
+      ? `<table class="t"><thead><tr><th>命令</th><th>后端</th><th>结果</th><th>耗时</th></tr></thead><tbody>${sandboxRows}</tbody></table>`
+      : `<div class="empty">${sandboxEmptyReason}</div>`,
+      "沙箱 = 在隔离环境里对代码运行编译/测试工具，相当于机器帮你跑一遍检查。只有「仓库路径」模式可用")}
+
+    <details class="adv">
+      <summary>高级审计信息（安全审批 / 执行统计 / 元数据）<span class="adv-caret">▸</span></summary>
+      <div class="grid grid-2" style="margin-top:12px">
+        ${panel("安全审批记录", `<table class="t"><thead><tr><th>命令</th><th>决策</th><th>原因</th></tr></thead><tbody>${permRows}</tbody></table>`,
+          "沙箱里每条要执行的命令都会先经过安全检查：allow=放行，deny=拒绝；拒绝的命令不会执行，全部留痕可查")}
+        ${panel("执行统计", `<div class="kv">
+          <span class="k">沙箱命令</span><span class="v">${m.tool_call_count} 次</span>
+          <span class="k">规则</span><span class="v">${m.rule_count} 条 · ${esc(m.rule_duration)}</span>
+          <span class="k">扫描文件</span><span class="v">${m.files_scanned} 个</span>
+          <span class="k">报告归档</span><span class="v">入库 ${m.artifacts_saved} · 被拒 ${m.artifacts_rejected}</span>
+          <span class="k">安全拦截</span><span class="v">${m.permission_denied} 次 · 异常 ${m.exception_count} 次</span>
+        </div>`)}
+        ${panel("任务元数据", `<div class="kv">
+          <span class="k">状态</span><span class="v">${esc(d.task.status)}</span>
+          <span class="k">文件</span><span class="v">${d.task.files_count}（Go ${d.task.go_files_count}）</span>
+          <span class="k">开始</span><span class="v">${fmtTime(d.task.started_at)}</span>
+          <span class="k">结束</span><span class="v">${fmtTime(d.task.completed_at)}</span>
+          <span class="k">结果</span><span class="v">${rep.summary.total_findings} 发现 + ${rep.summary.total_warnings} 警告 · 去重移除 ${rep.summary.dedup_removed}</span>
+        </div>`)}
+      </div>
+    </details>
   </div>`;
 
   renderFindings();

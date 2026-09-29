@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"code-review-agent/storage"
 )
@@ -306,5 +307,38 @@ func TestSettingsTestEndpointErrors(t *testing.T) {
 	viaProfile := callTest(`{"profile_id":"` + pid + `"}`)
 	if viaProfile["ok"] != true {
 		t.Errorf("按方案测试应成功, got %v", viaProfile)
+	}
+}
+
+// TestTaskNamePlumbing 任务名称透传：JSON 入参 → 任务行；超长截断到 80 字。
+func TestTaskNamePlumbing(t *testing.T) {
+	ts := newTestServer(t)
+	long := strings.Repeat("名", 100)
+	body := `{"diff_content":"--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package a\n+var x = 1\n","task_name":"` + long + `"}`
+	resp, _ := http.Post(ts.URL+"/api/reviews", "application/json", strings.NewReader(body))
+	var out struct {
+		TaskID string `json:"task_id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if out.TaskID == "" {
+		t.Fatal("应入队成功")
+	}
+	// 等队列跑完
+	var got string
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		_, v := getJSON(t, ts.URL+"/api/tasks/"+out.TaskID)
+		task, _ := v["task"].(map[string]any)
+		if task == nil {
+			continue
+		}
+		if task["status"] == "completed" || task["status"] == "failed" {
+			got, _ = task["task_name"].(string)
+			break
+		}
+	}
+	if runes := []rune(got); len(runes) != 80 {
+		t.Errorf("task_name 应截断到 80 字, got %d", len(runes))
 	}
 }

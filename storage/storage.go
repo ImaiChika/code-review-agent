@@ -89,7 +89,8 @@ const (
 type ReviewTask struct {
 	TaskID       string     `json:"task_id"`
 	Status       TaskStatus `json:"status"`
-	InputType    string     `json:"input_type"` // diff_file / repo_path / fixture
+	TaskName     string     `json:"task_name,omitempty"` // 用户可读的任务名称（可空；空 = 前端显示 InputPath）
+	InputType    string     `json:"input_type"`          // diff_file / repo_path / fixture
 	InputPath    string     `json:"input_path"`
 	FilesCount   int        `json:"files_count"`
 	GoFilesCount int        `json:"go_files_count"`
@@ -239,6 +240,7 @@ func (s *SQLiteStore) initTables() error {
 		`CREATE TABLE IF NOT EXISTS cr_review_tasks (
 			task_id TEXT PRIMARY KEY,
 			status TEXT NOT NULL DEFAULT 'pending',
+			task_name TEXT DEFAULT '',
 			input_type TEXT NOT NULL,
 			input_path TEXT NOT NULL,
 			files_count INTEGER DEFAULT 0,
@@ -362,6 +364,7 @@ func (s *SQLiteStore) migrateColumns() error {
 	rows.Close()
 
 	migrations := []struct{ col, ddl string }{
+		{"task_name", `ALTER TABLE cr_review_tasks ADD COLUMN task_name TEXT DEFAULT ''`},
 		{"risk_score", `ALTER TABLE cr_review_tasks ADD COLUMN risk_score REAL DEFAULT 0`},
 		{"risk_grade", `ALTER TABLE cr_review_tasks ADD COLUMN risk_grade TEXT DEFAULT ''`},
 	}
@@ -392,9 +395,9 @@ func (s *SQLiteStore) Close() error {
 // CreateTask 创建一个新的审查任务。
 func (s *SQLiteStore) CreateTask(task *ReviewTask) error {
 	_, err := s.db.Exec(
-		`INSERT INTO cr_review_tasks (task_id, status, input_type, input_path, files_count, go_files_count, started_at, risk_score, risk_grade)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.TaskID, task.Status, task.InputType, task.InputPath,
+		`INSERT INTO cr_review_tasks (task_id, status, task_name, input_type, input_path, files_count, go_files_count, started_at, risk_score, risk_grade)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.TaskID, task.Status, task.TaskName, task.InputType, task.InputPath,
 		task.FilesCount, task.GoFilesCount, task.StartedAt, task.RiskScore, task.RiskGrade,
 	)
 	return err
@@ -420,22 +423,25 @@ func (s *SQLiteStore) CreateFailedTask(task *ReviewTask, errMsg string) error {
 // GetTask 获取审查任务。
 func (s *SQLiteStore) GetTask(taskID string) (*ReviewTask, error) {
 	row := s.db.QueryRow(
-		`SELECT task_id, status, input_type, input_path, files_count, go_files_count,
+		`SELECT task_id, status, task_name, input_type, input_path, files_count, go_files_count,
 		        started_at, completed_at, duration, error_msg, risk_score, risk_grade
 		 FROM cr_review_tasks WHERE task_id = ?`, taskID,
 	)
 
 	var task ReviewTask
 	var completedAt sql.NullTime
-	var duration, errorMsg, riskGrade sql.NullString
+	var taskName, duration, errorMsg, riskGrade sql.NullString
 	var riskScore sql.NullFloat64
 	err := row.Scan(
-		&task.TaskID, &task.Status, &task.InputType, &task.InputPath,
+		&task.TaskID, &task.Status, &taskName, &task.InputType, &task.InputPath,
 		&task.FilesCount, &task.GoFilesCount,
 		&task.StartedAt, &completedAt, &duration, &errorMsg, &riskScore, &riskGrade,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if taskName.Valid {
+		task.TaskName = taskName.String
 	}
 	if completedAt.Valid {
 		task.CompletedAt = &completedAt.Time
@@ -479,7 +485,7 @@ func (s *SQLiteStore) UpdateTaskStatus(taskID string, status TaskStatus) error {
 // ListTasks 列出最近的审查任务。
 func (s *SQLiteStore) ListTasks(limit int) ([]*ReviewTask, error) {
 	rows, err := s.db.Query(
-		`SELECT task_id, status, input_type, input_path, files_count, go_files_count,
+		`SELECT task_id, status, task_name, input_type, input_path, files_count, go_files_count,
 		        started_at, completed_at, duration, error_msg, risk_score, risk_grade
 		 FROM cr_review_tasks ORDER BY started_at DESC LIMIT ?`, limit,
 	)
@@ -492,15 +498,18 @@ func (s *SQLiteStore) ListTasks(limit int) ([]*ReviewTask, error) {
 	for rows.Next() {
 		var task ReviewTask
 		var completedAt sql.NullTime
-		var duration, errorMsg, riskGrade sql.NullString
+		var taskName, duration, errorMsg, riskGrade sql.NullString
 		var riskScore sql.NullFloat64
 		err := rows.Scan(
-			&task.TaskID, &task.Status, &task.InputType, &task.InputPath,
+			&task.TaskID, &task.Status, &taskName, &task.InputType, &task.InputPath,
 			&task.FilesCount, &task.GoFilesCount,
 			&task.StartedAt, &completedAt, &duration, &errorMsg, &riskScore, &riskGrade,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if taskName.Valid {
+			task.TaskName = taskName.String
 		}
 		if completedAt.Valid {
 			task.CompletedAt = &completedAt.Time

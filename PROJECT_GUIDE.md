@@ -50,8 +50,9 @@
 ### 0.3 五分钟跑通第一次审查（新手照做）
 
 1. 打开网页，左侧导航点 **「02 审查中心」** 展开菜单，再点 **「新建审查」**。
-2. 页面中间有一排灰色小方块（示例），随便点一个，比如 `security_issue.diff`——它会自动把示例填进输入框，不用你打字。
-3. 点 **「执行审查」** 按钮。
+2. 先给任务起个名字（可选），比如"登录模块安全检查"——以后在任务记录里一眼就能找到。
+3. 页面中间有一排灰色小方块（示例），随便点一个，比如 `security_issue.diff`——它会自动把示例填进输入框，不用你打字。
+4. 点 **「执行审查」** 按钮。
 4. 等一两秒，下方出现结果：一个风险分数和问题列表。
 5. 点任何一条问题，它会展开：**证据**（它在代码里看到的原话，涉及密码的会自动打码成 `***REDACTED***`）和**修复建议**（照着改就行）。
 
@@ -67,7 +68,7 @@
 | 完整的代码文件，不懂什么是 diff | **粘贴代码** ← 最省事 | 填个文件名，把整个文件内容粘进去。全部内容都会被当成"新写的代码"来检查 |
 | 一堆文件，或一个 zip 压缩包 | **上传文件** | 选择文件（可多选）后提交。大小上限 10MB，zip 里的坏路径会被直接拒绝 |
 | GitHub 上一个公开 PR 的链接 | **GitHub PR** | 贴链接（`https://github.com/某人/某仓库/pull/数字` 或简写 `某人/某仓库#数字`），它会自动去把那个 PR 的改动拉下来审 |
-| 服务器电脑上的一个 git 仓库 | **仓库路径** | 填仓库的路径。**注意：它只看"改了还没提交"的部分**，已经 `git add` 或 commit 过的改动它看不见 |
+| 服务器电脑上的一个 git 仓库 | **仓库路径** | 填仓库的路径。**注意：它只看"改了还没提交"的部分**，已经 `git add` 或 commit 过的改动它看不见。**只有这种模式能开沙箱**（见下方说明） |
 
 ### 0.5 怎么看懂结果？
 
@@ -78,6 +79,7 @@
   - 🔵 **低危（蓝）**：缺测试这类——有空就补。
 - **「警告」是什么？** 系统不太确定、需要你人工瞄一眼的问题。警告不算进风险分，所以不会把分数吓人地抬高。（有一种情况会进警告：你之前把某个位置标记成了误报，它记住了，之后同样的位置就只温和提醒。）
 - 每条问题点开都有三样东西：**位置**（文件名:行号）、**证据**（代码原话）、**修复建议**（一句话告诉你怎么改）。
+- **沙箱是什么？** 就是让机器在隔离环境里帮你跑一遍 `go vet` / `go test`（编译检查 + 测试）。**只有"仓库路径"模式能开**：粘贴/上传/PR 只有变更片段、没有完整工程，跑不了测试——表单里沙箱开关在那些模式下会灰掉并说明原因，任务的"沙箱执行"一栏也会写清楚为什么没跑。任务详情最底下的"高级审计信息"是给管理员看的执行留痕（每条命令的安全审批记录等），平时不用展开。
 
 ### 0.6 觉得某条报错了？点「标记误报」
 
@@ -111,6 +113,8 @@
 | 提交太快被拒绝（429） | 同一个人短时间内提交太多次，等一两秒再点就好。 |
 | 传的 zip 被拒绝 | zip 里有不安全的路径（比如 `../` 开头）或超限（500 个文件 / 单个 2MB / 共 20MB）。检查压缩包内容。 |
 | 数据会丢吗？ | 所有记录都存在服务器上的一个数据库文件（`review.db`）里。Docker 部署时它在 `cra-data` 卷里，升级不丢；备份就是把 `review.db` 复制走。 |
+| 结果里"LLM 复核 openai"是什么意思？ | "openai" 只是接口协议的名字（OpenAI 兼容协议，各家都通用），实际用的模型紧跟其后显示，如 qwen3.8-flash。改版后直接显示模型名。 |
+| 沙箱为什么没跑？ | 沙箱需要完整工程才能跑 `go vet` / `go test`，所以只有"仓库路径"模式可用。其他模式在提交表单里沙箱开关是灰的（写了原因），任务详情"沙箱执行"一栏也会说明。 |
 
 ### 0.10 给部署管理员的一句话
 
@@ -243,7 +247,7 @@ PORT=9090 scripts/start.sh   # 自定义端口
 ```
 
 - **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
-- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**；**M8-设置中心起支持 `sandbox_backend`（local/container/container-fx/e2b）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护；`?llm_mode=` 查询参数开复核）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`、**M8-设置中心**：`GET/POST /api/settings`（LLM/E2B 运行时配置，GET 公开但密钥只回尾号提示，POST 受认证）、`POST /api/settings/test`（最小连通性测试，max_tokens=1，常见错误映射为用户可读提示）、`GET/DELETE /api/fp-marks`（误报记忆管理）、**M8-设置中心 v2 多方案**：`POST /api/settings/profiles`（新建，上限 10 个满则 400）、`POST/DELETE /api/settings/profiles/{id}`（更新/删除）、`POST /api/settings/profiles/{id}/current`（设当前）、`POST /api/settings/profiles/reset`（重置出厂，同服务商密钥保留）。
+- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**；**M8-设置中心起支持 `sandbox_backend`（local/container/container-fx/e2b）与 `task_name`（任务命名，≤80 字，列表/详情展示；upload 走 `?task_name=`）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护；`?llm_mode=` 查询参数开复核）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`、**M8-设置中心**：`GET/POST /api/settings`（LLM/E2B 运行时配置，GET 公开但密钥只回尾号提示，POST 受认证）、`POST /api/settings/test`（最小连通性测试，max_tokens=1，常见错误映射为用户可读提示）、`GET/DELETE /api/fp-marks`（误报记忆管理）、**M8-设置中心 v2 多方案**：`POST /api/settings/profiles`（新建，上限 10 个满则 400）、`POST/DELETE /api/settings/profiles/{id}`（更新/删除）、`POST /api/settings/profiles/{id}/current`（设当前）、`POST /api/settings/profiles/reset`（重置出厂，同服务商密钥保留）。
 - **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
 - **异步队列（M7-F1）**：`server/queue.go` worker 池（`--queue-workers`，默认 1 串行=SQLite 单写最稳，HTTP 已不被彼此阻塞）；单任务看门狗 `--task-timeout`（默认 10m，超时标 failed 并经 `CreateFailedTask` 补记 DB）；进行中状态在内存注册表（服务重启丢失未完成任务属预期）；runFn 可注入支撑状态机单测；runFn panic 被兜住不影响服务。
 - **认证与边界（M7-F2）**：`server/auth.go`——`--auth-token` 启用写保护（读公开，前端 `?token=<token>` 链接自动保存）；IP 令牌桶限流（2 req/s burst 10）只包提交端点；请求体 ≤10MB（413）；安全响应头 + 连接层超时。全部默认关闭/宽松，不改变旧行为。
@@ -750,6 +754,7 @@ rules:
 > - 📌 **LLM 成本纪律（2026-09-30 起生效，详见 §7.6）**：API Key 配置后所有 LLM 用量须按最低成本原则执行。
 > - ✅ **E6 v2 多方案升级完成（2026-09-30，同日用户需求）**：方案模型（自定义名称区分、非服务商区分；出厂预置 6 家——DeepSeek/千问/GLM/Kimi/OpenAI/MiMo，MiMo 端点经检索核实为 `api.xiaomimimo.com/v1`；上限 10 个，创建满 400 + 前端模态框拒绝；删除按钮置于方案详情最底部，确认弹窗；「选择作为当前配置」持久化于服务端，重新登录优先展示当前方案；重置出厂时同服务商密钥保留、当前为出厂方案则延续）。存储 `llm_profiles` JSON + `llm_current` 两键，**旧单配置懒迁移**（迁移进对应出厂方案并设为当前、旧键删除）。**测试抓到关键缺陷**：`LLMProfile.APIKey` 带 `json:"-"` 导致整包序列化时密钥被静默丢弃（存储层改用带 `api_key` 标签的 storedLLMProfile DTO 修复）——单测 TestProfilesUpdateCurrentDelete 首跑即红。测试：server +5 用例（迁移/上限/更新设当前删除/重置/测试端点 profile_id 回退）；浏览器实测：迁移后千问 key 保留（尾号 msNw）、切换当前刷新持久、10 上限弹窗、删除/重置确认弹窗、重置后 key 保留、真实测试连接 2s、审查页就绪提示联动；布局审计无溢出。
 > - 🔑 **密钥持久化（2026-09-30）**：千问（dashscope/qwen3.8-flash）与 E2B 两把 key 已双写持久化——`cr_settings` 表（服务真相源，网页设置中心管理）+ `.env`（gitignored 镜像备份，docker compose 透传 `OPENAI_API_KEY`/`E2B_API_KEY`）。**测试/清理现场时禁止删除或覆盖 `review.db` 与 `.env`**（此前"恢复现场"流程会回滚 review.db，恢复前必须先备份 cr_settings）。E2B key 已真机验证：最小沙箱跑通 + 服务端 API 端到端（规则 3 findings + e2b 后端 go vet exit 0；go test/staticcheck 127 为已知默认模板无 Go 工具链，需 E2B_TEMPLATE）。云端多用户迁移（每用户上传自己的密钥）登记为 E8。
+> - ✅ **体验澄清四连修（2026-09-30，用户实测反馈）**：① **LLM 显示协议名误导**——结果里"LLM 复核 openai"实为 OpenAI 兼容协议名而非服务商；`Monitor.LLMModel` 记录实际模型名（fake 模式记 "fake（确定性回放）"），前端改为显示模型名（实测 "LLM 复核 qwen3.8-flash · 送审 2 · 剔除 2"）。② **沙箱语义不可见**——沙箱选项从"仓库路径"标签内移到全局表单区：非仓库模式开关置灰 + 人话原因（"粘贴/上传/PR 只有变更片段，没有完整工程"），任务详情"沙箱执行"空表也写明原因（按输入类型区分文案）；仓库模式提示将运行的三条命令。③ **任务命名**——`task_name` 全链路（列迁移 task_name / CreateTask / report.task_name / API 入参 + upload `?task_name=`；80 字 rune 截断），任务列表/看板/详情名称优先展示。④ **任务详情去模糊化**——"权限决策"更名"安全审批记录"（帮助文案解释 allow/deny 与留痕语义），监控标签白话化（工具调用→沙箱命令、产物→报告归档、权限拦截→安全拦截），安全审批/执行统计/元数据三项默认折叠进"高级审计信息"。测试：review +1（TaskName+LLMModel）、server +1（task_name 截断透传）；浏览器实测：diff 模式沙箱禁用带原因、详情折叠/展开、名称三处展示、真实 LLM 模型名显示。
 > - ⏭ 下一步：D3 go/types 类型增强（repo 模式加载类型信息，RES/ERR 规则从"猜"变"知道"）。
 
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。

@@ -21,10 +21,11 @@ import (
 // ReviewReport 表示一次完整的代码审查报告。
 type ReviewReport struct {
 	// 基本信息
-	TaskID    string `json:"task_id"`    // 审查任务 ID
-	StartTime string `json:"start_time"` // 审查开始时间
-	EndTime   string `json:"end_time"`   // 审查结束时间
-	Duration  string `json:"duration"`   // 耗时
+	TaskID    string `json:"task_id"`             // 审查任务 ID
+	TaskName  string `json:"task_name,omitempty"` // 用户可读的任务名称（可空）
+	StartTime string `json:"start_time"`          // 审查开始时间
+	EndTime   string `json:"end_time"`            // 审查结束时间
+	Duration  string `json:"duration"`            // 耗时
 
 	// 输入信息
 	InputType    string `json:"input_type"`     // 输入类型：diff_file / repo_path / fixture
@@ -110,7 +111,8 @@ type MonitorInfo struct {
 	ExceptionCount    int                          `json:"exception_count"`          // 异常次数
 	ArtifactsSaved    int                          `json:"artifacts_saved"`          // 产物入库数（M1-B5）
 	ArtifactsRejected int                          `json:"artifacts_rejected"`       // 被限制拒绝的产物数（M1-B5）
-	LLMMode           string                       `json:"llm_mode,omitempty"`       // LLM 复核模式（M4：空=未启用）
+	LLMMode           string                       `json:"llm_mode,omitempty"`       // LLM 复核协议（M4："openai"=OpenAI 兼容协议；显示用 LLMModel）
+	LLMModel          string                       `json:"llm_model,omitempty"`      // 实际使用的模型名（M8：qwen3.8-flash 等，用户最关心这个）
 	LLMReviewed       int                          `json:"llm_reviewed"`             // 送审候选数（M4-C1）
 	LLMDropped        int                          `json:"llm_dropped"`              // LLM 否决剔除数（M4-C1）
 	LLMSuggested      int                          `json:"llm_suggested,omitempty"`  // LLM 修复建议生成数（M8-C3）

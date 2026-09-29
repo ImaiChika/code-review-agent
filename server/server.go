@@ -285,9 +285,21 @@ type createReviewRequest struct {
 	RepoPath       string            `json:"repo_path"`       // git 仓库路径（取未提交变更，服务器本地）
 	FilesContent   map[string]string `json:"files_content"`   // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
 	PrURL          string            `json:"pr_url"`          // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
+	TaskName       string            `json:"task_name"`       // M8：用户可读的任务名称（可空，≤80 字，超长截断）
 	Sandbox        bool              `json:"sandbox"`         // 是否执行沙箱（仅 repo_path 有效）
 	SandboxBackend string            `json:"sandbox_backend"` // M8-设置中心：local / container / container-fx / e2b；空 = 服务默认
 	LLMMode        string            `json:"llm_mode"`        // LLM 复核（M4）："fake" 确定性回放 / "openai"；空 = 关闭
+}
+
+// sanitizeTaskName 任务名清洗：去首尾空白、压掉换行、超长截断到 80 字。
+func sanitizeTaskName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if runes := []rune(s); len(runes) > 80 {
+		s = string(runes[:80]) // 名称上限 80 字符（按 rune，中英文一致）
+	}
+	return s
 }
 
 // allowedSandboxBackends 沙箱后端白名单（防止任意字符串进沙箱构造器）。
@@ -467,6 +479,7 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 			FileContents: fileContents,
 			RepoPath:     req.RepoPath,
 			TaskID:       taskID,
+			TaskName:     sanitizeTaskName(req.TaskName),
 			InputLabel:   inputPath,
 			LLMMode:      req.LLMMode,
 			RulesDir:     s.cfg.RulesDir,
@@ -541,10 +554,11 @@ func (s *Server) handleUploadReview(w http.ResponseWriter, r *http.Request) {
 			AuditFile:    "tool_safety_audit.jsonl",
 		},
 	}
-	// M8-设置中心：上传审查同样支持 LLM 复核开关（?llm_mode=openai）+ 设置注入
-	if r.URL.Query().Get("llm_mode") != "" {
-		job.opts.LLMMode = r.URL.Query().Get("llm_mode")
+	// M8-设置中心：上传审查同样支持 LLM 复核开关（?llm_mode=openai）与任务名（?task_name=）+ 设置注入
+	if q := r.URL.Query(); q.Get("llm_mode") != "" {
+		job.opts.LLMMode = q.Get("llm_mode")
 	}
+	job.opts.TaskName = sanitizeTaskName(r.URL.Query().Get("task_name"))
 	if err := s.injectSettings(&job.opts); err != nil {
 		writeErr(w, http.StatusInternalServerError, "读取设置失败: "+err.Error())
 		return
@@ -792,6 +806,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	for _, t := range trend.Recent {
 		recent = append(recent, map[string]any{
 			"task_id":    t.TaskID,
+			"task_name":  t.TaskName,
 			"input_path": t.InputPath,
 			"started_at": t.StartedAt,
 			"risk_score": t.RiskScore,
