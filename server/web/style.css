@@ -401,3 +401,37 @@ a.link:hover { text-decoration: underline; }
   background:#fff; color:var(--dim); cursor:pointer; }
 .fp-btn:hover { border-color:var(--violet); color:var(--violet); }
 .fp-btn.done { border-color:var(--green); color:var(--green); background:#f0fdf4; cursor:default; }
+
+/* ─── 设置中心 v2：方案列表 / 详情 / 模态框 ─── */
+.profile-list { display: flex; flex-direction: column; gap: 8px; }
+.profile-card {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+  background: var(--panel);
+}
+.profile-card:hover { border-color: var(--line-strong); background: var(--bg-soft); }
+.profile-card.sel { border-color: var(--accent); background: var(--accent-soft); }
+.profile-card.current { border-left: 3px solid var(--accent); }
+.pc-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.pc-sub { margin-top: 3px; font-size: 11.5px; color: var(--ink-dim); font-family: var(--mono); }
+.pf-divider { height: 1px; background: var(--line); margin: 16px 0; }
+.btn-danger {
+  background: var(--red-soft); color: var(--red);
+  border: 1px solid transparent;
+}
+.btn-danger:hover { background: #fee2e2; }
+.modal-mask {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(15, 23, 42, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--panel); border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  width: min(420px, calc(100vw - 48px));
+  padding: 22px 24px;
+}
+.modal-title { font-size: 15px; color: var(--ink); margin-bottom: 10px; }
+.modal-msg { font-size: 13px; color: var(--ink-2); line-height: 1.8; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }

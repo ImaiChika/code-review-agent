@@ -129,11 +129,15 @@ type SettingKV struct {
 
 // 运行时设置的固定键名（M8-设置中心）。
 const (
-	SettingLLMProvider = "llm_provider" // openai / dashscope / ollama / custom（仅用于前端回显）
-	SettingLLMBaseURL  = "llm_base_url" // OpenAI 兼容端点
-	SettingLLMModel    = "llm_model"    // 模型名
-	SettingLLMAPIKey   = "llm_api_key"  // 敏感
+	SettingLLMProvider = "llm_provider" // [已废弃→迁移进方案] 服务商标签
+	SettingLLMBaseURL  = "llm_base_url" // [已废弃→迁移进方案] OpenAI 兼容端点
+	SettingLLMModel    = "llm_model"    // [已废弃→迁移进方案] 模型名
+	SettingLLMAPIKey   = "llm_api_key"  // [已废弃→迁移进方案] 敏感
 	SettingE2BAPIKey   = "e2b_api_key"  // 敏感
+
+	// M8-设置中心 v2：多方案（最多 10 个）
+	SettingLLMProfiles = "llm_profiles" // JSON 数组（含密钥，接口层脱敏外发）
+	SettingLLMCurrent  = "llm_current"  // 当前方案 ID
 )
 
 // TrendStats 趋势聚合（M7-F5，纯 SQL 聚合，任务数无关的 O(1) 响应）。

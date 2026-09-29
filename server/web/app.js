@@ -842,81 +842,120 @@ async function viewRules() {
   log(`规则引擎就绪 — ${data.rules.length} 条规则`);
 }
 
-/* ══════════════ 视图：模型与密钥（M8-设置中心） ══════════════ */
-/* 服务商选项：label + 默认 Base URL（选择时自动填充，可手改） */
+/* ══════════════ 视图：模型与密钥（M8-设置中心 v2 · 多方案） ══════════════ */
+/* 服务商选项：label + 默认 Base URL（选择时自动填充，可手改）。方案以自定义名称区分，
+   同一服务商可有多个方案；出厂预置 6 家（与后端 factoryLLMProfiles 对应）。 */
 const PROVIDERS = [
+  { id: "deepseek",  label: "DeepSeek（深度求索）",              base: "https://api.deepseek.com/v1" },
   { id: "dashscope", label: "通义千问 · 阿里云百炼（OpenAI 兼容）", base: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
-  { id: "openai",    label: "OpenAI",                              base: "https://api.openai.com/v1" },
-  { id: "ollama",    label: "Ollama（本机，无需 Key）",             base: "http://localhost:11434/v1" },
-  { id: "custom",    label: "自定义（vLLM / OneAPI / 中转站 …）",   base: "" },
+  { id: "glm",       label: "智谱 GLM（bigmodel）",              base: "https://open.bigmodel.cn/api/paas/v4" },
+  { id: "kimi",      label: "Kimi（月之暗面 Moonshot）",          base: "https://api.moonshot.cn/v1" },
+  { id: "openai",    label: "OpenAI",                            base: "https://api.openai.com/v1" },
+  { id: "mimo",      label: "MiMo（小米开放平台）",               base: "https://api.xiaomimimo.com/v1" },
+  { id: "ollama",    label: "Ollama（本机，无需 Key）",           base: "http://localhost:11434/v1" },
+  { id: "custom",    label: "自定义（vLLM / OneAPI / 中转站 …）",  base: "" },
 ];
 const MODEL_SUGGESTIONS = {
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
   dashscope: ["qwen3.8-flash", "qwen-flash", "qwen-plus", "qwen3-coder-flash"],
+  glm: ["glm-4.5-flash", "glm-4-flash", "glm-4-plus"],
+  kimi: ["moonshot-v1-8k", "kimi-k2-turbo-preview", "kimi-k2-preview"],
   openai: ["gpt-4o-mini", "gpt-4o"],
+  mimo: ["mimo-7b", "MiMo-7B-RL"],
   ollama: ["qwen2.5-coder:7b", "llama3.1:8b"],
   custom: [],
 };
 
-let settingsCache = null;
+/* ---------- 主题化模态框（10 上限拒绝 / 删除与重置确认） ---------- */
+function modalOverlay(html) {
+  const mask = document.createElement("div");
+  mask.className = "modal-mask";
+  mask.innerHTML = `<div class="modal" role="dialog">${html}</div>`;
+  document.body.appendChild(mask);
+  return mask;
+}
+function alertModal(title, msg) {
+  const mask = modalOverlay(`<h3 class="modal-title">${esc(title)}</h3><p class="modal-msg">${esc(msg)}</p>
+    <div class="modal-actions"><button class="btn" id="modal-ok">知道了</button></div>`);
+  mask.querySelector("#modal-ok").onclick = () => mask.remove();
+}
+function confirmModal(title, msg, okLabel) {
+  return new Promise(resolve => {
+    const mask = modalOverlay(`<h3 class="modal-title">${esc(title)}</h3><p class="modal-msg">${esc(msg)}</p>
+      <div class="modal-actions"><button class="btn btn-ghost" id="modal-cancel">取消</button>
+      <button class="btn btn-danger" id="modal-ok">${esc(okLabel || "确认")}</button></div>`);
+    mask.querySelector("#modal-cancel").onclick = () => { mask.remove(); resolve(false); };
+    mask.querySelector("#modal-ok").onclick = () => { mask.remove(); resolve(true); };
+  });
+}
+
+/* ---------- 页面状态 ---------- */
+let settingsCache = null;      // 最近一次 GET /api/settings 的完整视图
+let selectedProfileID = null;  // 详情区正在展示的方案
+let profileCreateMode = false; // 详情区是否处于"新建方案"模式
 
 async function viewSettings() {
   log("加载设置 …");
-  let st;
-  try { st = await api("/api/settings"); }
+  try { settingsCache = await api("/api/settings"); }
   catch (e) {
     $view.innerHTML = `<div class="view-enter"><div class="notice">✗ 读取设置失败：${esc(e.message)}</div></div>`;
     return;
   }
-  settingsCache = st;
+  profileCreateMode = false;
+  // 优先展示"当前方案"（用户选择后会记住，重新登录也展示它）；没有则选第一个
+  selectedProfileID = settingsCache.current_id ||
+    (settingsCache.profiles[0] && settingsCache.profiles[0].id) || null;
 
-  const providerOpts = PROVIDERS.map(p =>
-    `<option value="${p.id}" ${st.llm.provider === p.id ? "selected" : ""}>${p.label}</option>`).join("");
+  renderSettingsPage();
+  log(`设置就绪 — ${settingsCache.profiles.length}/${settingsCache.max_profiles} 个方案 · 当前：${currentProfileName() || "未选择"}`);
+}
+
+function currentProfileName() {
+  if (!settingsCache) return "";
+  const p = settingsCache.profiles.find(x => x.id === settingsCache.current_id);
+  return p ? p.name : "";
+}
+
+function renderSettingsPage() {
+  const st = settingsCache;
+  const cards = st.profiles.map(p => `
+    <div class="profile-card${p.id === selectedProfileID ? " sel" : ""}${p.is_current ? " current" : ""}"
+         onclick="selectProfile('${esc(p.id)}')">
+      <div class="pc-name">${esc(p.name)}${p.is_current ? ' <span class="badge info">当前</span>' : ""}${p.built_in ? ' <span class="badge low">出厂</span>' : ""}</div>
+      <div class="pc-sub">${esc(p.model || "未设模型")} · ${p.key_set ? `✓ 已配 Key（尾号 ${esc(p.key_hint.slice(-4))}）` : "未配 Key"}</div>
+    </div>`).join("");
 
   $view.innerHTML = `
   <div class="view-enter">
     <h2 class="view-title">模型与密钥</h2>
-
     <div class="grid grid-2">
       <div>
-        ${panel("智能功能配置", `
+        ${panel(`配置方案（${st.profiles.length}/${st.max_profiles}）`, `
+          <div class="profile-list">${cards || '<div class="empty">还没有方案</div>'}</div>
+          <div style="display:flex;gap:10px;margin-top:12px">
+            <button class="btn" id="btn-add-profile" onclick="startAddProfile()">＋ 添加新方案</button>
+            <button class="btn btn-ghost" onclick="resetProfiles()">↺ 重置为出厂方案</button>
+          </div>`, "方案 = 一套「名称 + 服务商 + 端点 + 模型 + 密钥」。切换当前方案后，审查即用该方案；选择会记住，重新登录也优先展示它")}
+        <div style="height:14px"></div>
+        ${panel("E2B 云沙箱", `
           <div class="field">
-            <label>模型服务商</label>
-            <select class="in" id="set-provider">${providerOpts}</select>
-          </div>
-          <div class="field">
-            <label>Base URL（OpenAI 兼容端点）</label>
-            <input class="in" id="set-base" value="${esc(st.llm.base_url)}" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
-          </div>
-          <div class="field">
-            <label>模型名</label>
-            <input class="in" id="set-model" value="${esc(st.llm.model)}" list="model-list" placeholder="qwen3.8-flash">
-            <datalist id="model-list">${(MODEL_SUGGESTIONS[st.llm.provider] || []).map(m => `<option value="${m}">`).join("")}</datalist>
-          </div>
-          <div class="field">
-            <label>LLM API Key ${st.llm.key_set ? `<span class="badge info">已保存（尾号 ${esc(st.llm.key_hint.slice(-4))}，来源：${st.llm.key_source === "db" ? "本页设置" : "环境变量"}）</span> <a class="link" href="javascript:clearKey('llm')">清除</a>` : `<span class="badge low">未设置</span>`}</label>
-            <input class="in" type="password" id="set-llm-key" placeholder="${st.llm.key_set ? "留空保持不变；输入新值即覆盖" : "粘贴服务商发放的 API Key"}" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>E2B API Key（云端沙箱） ${st.e2b.key_set ? `<span class="badge info">已保存（尾号 ${esc(st.e2b.key_hint.slice(-4))}）</span> <a class="link" href="javascript:clearKey('e2b')">清除</a>` : `<span class="badge low">未设置</span>`}</label>
+            <label>E2B API Key ${st.e2b.key_set ? `<span class="badge info">已保存（尾号 ${esc(st.e2b.key_hint.slice(-4))}，来源：${st.e2b.key_source === "db" ? "本页设置" : "环境变量"}）</span> <a class="link" href="javascript:clearE2BKey()">清除</a>` : `<span class="badge low">未设置</span>`}</label>
             <input class="in" type="password" id="set-e2b-key" placeholder="${st.e2b.key_set ? "留空保持不变；输入新值即覆盖" : "e2b.dev 控制台获取"}" autocomplete="off">
           </div>
-          <div style="display:flex;gap:10px;margin-top:6px">
-            <button class="btn" id="btn-save-settings" onclick="saveSettings()">保存设置</button>
-            <button class="btn btn-ghost" id="btn-test-llm" onclick="testLLM()">测试连接</button>
-          </div>
-          <div id="test-result" style="margin-top:12px"></div>
-        `, "保存后立即对新审查生效，无需重启服务。密钥不会回传浏览器明文，只显示尾号")}
-      </div>
-
-      <div>
+          <button class="btn" onclick="saveE2BKey()">保存 E2B Key</button>`,
+          "云端沙箱后端共用这一把 key（不分方案）。仓库审查选「E2B 云沙箱」时使用")}
+        <div style="height:14px"></div>
         ${panel("当前状态", `
           <div class="kv">
-            <span class="k">LLM 复核</span><span class="v">${st.llm.ready ? `<b style="color:var(--green)">✓ 就绪</b>（${esc(st.llm.model || "未设模型名")}）` : "未配置 — 新建审查页的「LLM 复核降噪」开关不可用"}</span>
-            <span class="k">E2B 云沙箱</span><span class="v">${st.e2b.key_set ? `<b style="color:var(--green)">✓ 已配置</b>` : "未配置 — 仓库审查选 E2B 后端会提示"}</span>
+            <span class="k">LLM 复核</span><span class="v">${st.llm.ready ? `<b style="color:var(--green)">✓ 就绪</b>（${esc(st.llm.model || "")} · 方案「${esc(currentProfileName())}」）` : "未就绪 — 请选择方案并配好 Key"}</span>
+            <span class="k">E2B 云沙箱</span><span class="v">${st.e2b.key_set ? `<b style="color:var(--green)">✓ 已配置</b>` : "未配置"}</span>
             <span class="k">服务默认沙箱</span><span class="v mono">${esc(st.sandbox_default)}</span>
             <span class="k">写操作认证</span><span class="v">${st.auth_enabled ? "已启用（修改设置需 token）" : "未启用（本地模式）"}</span>
           </div>`)}
-
+      </div>
+      <div>
+        <div id="profile-detail"></div>
+        <div style="height:14px"></div>
         ${panel("安全说明", `
           <div class="dim" style="line-height:1.9;font-size:12.5px">
             · API Key 只保存在<b>服务器本机</b>的 SQLite 数据库（cr_settings 表），不会出现在日志、报告或任务记录里；<br>
@@ -925,7 +964,6 @@ async function viewSettings() {
             · 请勿把服务器地址和 token 发给不信任的人——他们能以你的 key 消耗模型额度；<br>
             · 如怀疑泄露：先在服务商控制台吊销 key，再回这里清除并换新。
           </div>`)}
-
         ${panel("成本说明（省钱纪律）", `
           <div class="dim" style="line-height:1.9;font-size:12.5px">
             · LLM 复核<b>默认关闭</b>，每次审查都要在新建审查页手动勾选；<br>
@@ -937,70 +975,208 @@ async function viewSettings() {
       </div>
     </div>
   </div>`;
+  renderProfileDetail();
+}
 
-  // 服务商切换 → 自动填默认 Base URL 与模型建议（用户可手改）
-  document.getElementById("set-provider").addEventListener("change", e => {
+/* ---------- 方案选择与详情 ---------- */
+function selectProfile(id) {
+  selectedProfileID = id;
+  profileCreateMode = false;
+  renderSettingsPage();
+}
+
+function startAddProfile() {
+  if (settingsCache.profiles.length >= settingsCache.max_profiles) {
+    // 用户要求：超过 10 个弹窗提示拒绝
+    alertModal("无法添加方案",
+      `最多 ${settingsCache.max_profiles} 个配置方案，现在已经满了。请先删除不用的方案，再来添加新的。`);
+    return;
+  }
+  profileCreateMode = true;
+  renderSettingsPage();
+  log("新建方案 — 填写后点「保存新方案」");
+}
+
+function providerOptions(sel) {
+  return PROVIDERS.map(p => `<option value="${p.id}" ${sel === p.id ? "selected" : ""}>${p.label}</option>`).join("");
+}
+
+function renderProfileDetail() {
+  const wrap = document.getElementById("profile-detail");
+  if (!wrap) return;
+  const st = settingsCache;
+
+  if (profileCreateMode) {
+    wrap.innerHTML = panel("新方案", `
+      <div class="field"><label>方案名称（自定义，仅用于区分）</label>
+        <input class="in" id="pf-name" placeholder="如 DeepSeek 日常 / 中转站 A"></div>
+      <div class="field"><label>模型服务商</label>
+        <select class="in" id="pf-provider">${providerOptions("custom")}</select></div>
+      <div class="field"><label>Base URL（OpenAI 兼容端点）</label>
+        <input class="in" id="pf-base" placeholder="https://…/v1"></div>
+      <div class="field"><label>模型名</label>
+        <input class="in" id="pf-model" list="model-list" placeholder="模型 ID">
+        <datalist id="model-list"></datalist></div>
+      <div class="field"><label>API Key</label>
+        <input class="in" type="password" id="pf-key" placeholder="粘贴服务商发放的 API Key" autocomplete="off"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="btn" onclick="saveProfile(null)">保存新方案</button>
+        <button class="btn btn-ghost" onclick="cancelCreate()">取消</button>
+      </div>
+      <div id="test-result" style="margin-top:12px"></div>`);
+    bindProviderAutoFill("pf-provider", "pf-base", "pf-model");
+    return;
+  }
+
+  const p = st.profiles.find(x => x.id === selectedProfileID);
+  if (!p) {
+    wrap.innerHTML = panel("方案详情", `<div class="empty">左侧选择一个方案，或点「＋ 添加新方案」</div>`);
+    return;
+  }
+
+  wrap.innerHTML = panel(`方案详情 — ${esc(p.name)}`, `
+    <div class="field"><label>方案名称（自定义，仅用于区分）</label>
+      <input class="in" id="pf-name" value="${esc(p.name)}"></div>
+    <div class="field"><label>模型服务商</label>
+      <select class="in" id="pf-provider">${providerOptions(p.provider)}</select></div>
+    <div class="field"><label>Base URL（OpenAI 兼容端点）</label>
+      <input class="in" id="pf-base" value="${esc(p.base_url)}" placeholder="https://…/v1"></div>
+    <div class="field"><label>模型名</label>
+      <input class="in" id="pf-model" list="model-list" value="${esc(p.model)}">
+      <datalist id="model-list">${(MODEL_SUGGESTIONS[p.provider] || []).map(m => `<option value="${m}">`).join("")}</datalist></div>
+    <div class="field"><label>API Key ${p.key_set ? `<span class="badge info">已保存（尾号 ${esc(p.key_hint.slice(-4))}）</span>` : `<span class="badge low">未设置</span>`}</label>
+      <input class="in" type="password" id="pf-key" placeholder="${p.key_set ? "留空保持不变；输入新值即覆盖" : "粘贴服务商发放的 API Key"}" autocomplete="off"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn" onclick="saveProfile('${esc(p.id)}')">保存修改</button>
+      <button class="btn btn-ghost" onclick="testProfileLLM('${esc(p.id)}')">测试连接</button>
+    </div>
+    <div id="test-result" style="margin-top:12px"></div>
+    <div class="pf-divider"></div>
+    <button class="btn" id="btn-set-current" onclick="setCurrentProfile('${esc(p.id)}')"
+      ${p.is_current ? 'disabled title="已经是当前方案"' : ""}>${p.is_current ? "✓ 当前使用中" : "选择作为当前配置"}</button>
+    <div class="pf-divider"></div>
+    <button class="btn btn-danger" onclick="deleteProfile('${esc(p.id)}')">删除方案</button>`,
+    "保存后立即对新审查生效。设为当前后，审查与重新登录都优先使用/展示该方案");
+  bindProviderAutoFill("pf-provider", "pf-base", "pf-model");
+}
+
+function bindProviderAutoFill(selID, baseID, modelID) {
+  const sel = document.getElementById(selID);
+  if (!sel) return;
+  sel.addEventListener("change", e => {
     const p = PROVIDERS.find(x => x.id === e.target.value);
-    if (p && p.base) document.getElementById("set-base").value = p.base;
-    document.getElementById("model-list").innerHTML =
-      (MODEL_SUGGESTIONS[e.target.value] || []).map(m => `<option value="${m}">`).join("");
+    if (p && p.base) document.getElementById(baseID).value = p.base;
+    const dl = document.getElementById("model-list");
+    if (dl) dl.innerHTML = (MODEL_SUGGESTIONS[e.target.value] || []).map(m => `<option value="${m}">`).join("");
   });
-  log(`设置就绪 — LLM ${st.llm.ready ? "已就绪" : "未配置"} · E2B ${st.e2b.key_set ? "已配置" : "未配置"}`);
 }
 
-async function saveSettings() {
-  const btn = document.getElementById("btn-save-settings");
-  const body = {
-    llm_provider: document.getElementById("set-provider").value,
-    llm_base_url: document.getElementById("set-base").value.trim(),
-    llm_model: document.getElementById("set-model").value.trim(),
+/* ---------- 方案操作 ---------- */
+function collectProfileForm() {
+  return {
+    name: document.getElementById("pf-name").value.trim(),
+    provider: document.getElementById("pf-provider").value,
+    base_url: document.getElementById("pf-base").value.trim(),
+    model: document.getElementById("pf-model").value.trim(),
   };
-  const llmKey = document.getElementById("set-llm-key").value.trim();
-  if (llmKey) body.llm_api_key = llmKey;
-  const e2bKey = document.getElementById("set-e2b-key").value.trim();
-  if (e2bKey) body.e2b_api_key = e2bKey;
+}
 
-  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> 保存中 …`;
+async function saveProfile(id) {
+  const isCreate = !id;
+  const f = collectProfileForm();
+  const body = Object.assign({}, f);
+  const keyEl = document.getElementById("pf-key");
+  const typed = keyEl ? keyEl.value.trim() : "";
+  if (typed) body.llm_api_key = typed;
+
   try {
-    const st = await api("/api/settings", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
+    const st = isCreate
+      ? await api("/api/settings/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      : await api(`/api/settings/profiles/${encodeURIComponent(id)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     settingsCache = st;
-    log("设置已保存，对新审查立即生效");
-    await viewSettings(); // 重渲染拿到新的已保存提示
+    if (isCreate) {
+      // 新方案自动进入选择列表并选中
+      const created = st.profiles.filter(x => !settingsCache.current_id || true);
+      profileCreateMode = false;
+      // 选中最新的（后端在创建后返回完整列表；按名称匹配新方案）
+      const mine = st.profiles.find(x => x.name === f.name && x.model === f.model);
+      selectedProfileID = mine ? mine.id : (st.profiles[st.profiles.length - 1].id);
+      log(`新方案「${f.name}」已保存并加入列表`);
+    } else {
+      log(`方案「${f.name}」已保存`);
+    }
+    renderSettingsPage();
   } catch (e) {
+    // 上限等业务拒绝：弹窗展示（用户要求的弹窗提示）
+    alertModal("保存失败", e.message);
     log(`保存失败 — ${e.message}`);
-    const box = document.getElementById("test-result");
-    if (box) box.innerHTML = `<div class="notice">✗ 保存失败：${esc(e.message)}</div>`;
-  } finally {
-    btn.disabled = false; btn.innerHTML = "保存设置";
   }
 }
 
-async function clearKey(which) {
-  const body = which === "llm" ? { llm_api_key: "-" } : { e2b_api_key: "-" };
+function cancelCreate() {
+  profileCreateMode = false;
+  renderSettingsPage();
+}
+
+async function setCurrentProfile(id) {
   try {
-    await api("/api/settings", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    log(which === "llm" ? "LLM API Key 已清除" : "E2B API Key 已清除");
-    await viewSettings();
+    settingsCache = await api(`/api/settings/profiles/${encodeURIComponent(id)}/current`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    selectedProfileID = id;
+    renderSettingsPage();
+    log(`已设为当前配置：${currentProfileName()} — 之后审查与登录都优先使用/展示它`);
   } catch (e) {
-    log(`清除失败 — ${e.message}`);
+    alertModal("设置失败", e.message);
   }
 }
 
-async function testLLM() {
-  const btn = document.getElementById("btn-test-llm");
-  const box = document.getElementById("test-result");
-  const body = {
-    llm_base_url: document.getElementById("set-base").value.trim(),
-    llm_model: document.getElementById("set-model").value.trim(),
-  };
-  const typed = document.getElementById("set-llm-key").value.trim();
-  if (typed) body.llm_api_key = typed; // 测试专用，不落库
+async function deleteProfile(id) {
+  const p = settingsCache.profiles.find(x => x.id === id);
+  const name = p ? p.name : "该方案";
+  const ok = await confirmModal("删除方案",
+    `确定删除「${name}」？方案里保存的 API Key 将一并清除。此操作不可撤销。`, "删除");
+  if (!ok) return;
+  try {
+    settingsCache = await api(`/api/settings/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (selectedProfileID === id) {
+      selectedProfileID = settingsCache.current_id || (settingsCache.profiles[0] && settingsCache.profiles[0].id) || null;
+    }
+    renderSettingsPage();
+    log(`方案「${name}」已删除`);
+  } catch (e) {
+    alertModal("删除失败", e.message);
+  }
+}
 
-  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> 测试中 …`;
+async function resetProfiles() {
+  const ok = await confirmModal("重置为出厂方案",
+    "将恢复为 6 个出厂方案（DeepSeek / 通义千问 / 智谱 GLM / Kimi / OpenAI / MiMo）：自定义方案会被删除，同服务商已填的密钥会保留，其余修改（改名/换模型）不保留。确定继续？", "重置");
+  if (!ok) return;
+  try {
+    settingsCache = await api("/api/settings/profiles/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    selectedProfileID = settingsCache.current_id || (settingsCache.profiles[0] && settingsCache.profiles[0].id) || null;
+    profileCreateMode = false;
+    renderSettingsPage();
+    log("已重置为出厂方案");
+  } catch (e) {
+    alertModal("重置失败", e.message);
+  }
+}
+
+async function testProfileLLM(id) {
+  const btn = document.getElementById("btn-test-llm") || event && event.target;
+  const box = document.getElementById("test-result");
+  const body = { profile_id: id || "" };
+  // 表单里的显式值优先（含未保存的修改与新输入的 key）
+  if (document.getElementById("pf-base")) body.llm_base_url = document.getElementById("pf-base").value.trim();
+  if (document.getElementById("pf-model")) body.llm_model = document.getElementById("pf-model").value.trim();
+  const typed = document.getElementById("pf-key") ? document.getElementById("pf-key").value.trim() : "";
+  if (typed) body.llm_api_key = typed; // 测试专用，不落库
+  if (!id && !body.llm_base_url) { // 新建模式未填端点
+    box.innerHTML = `<div class="notice">✗ 请先填写 Base URL 和模型名再测试</div>`;
+    return;
+  }
+
+  if (btn && btn.disabled !== undefined) { btn.disabled = true; }
   box.innerHTML = `<div class="notice progress" style="display:flex;align-items:center;gap:10px"><span class="spin"></span><span>正在连接服务商 …（只花 1 个 token）</span></div>`;
   try {
     const r = await api("/api/settings/test", {
@@ -1014,10 +1190,37 @@ async function testLLM() {
       log(`测试连接失败 — ${r.message}`);
     }
   } catch (e) {
-    box.innerHTML = `<div class="notice">✗ 测试请求失败：${esc(e.message)}${String(e.message).includes("401") ? "（开启认证后修改设置需要 token）" : ""}</div>`;
+    box.innerHTML = `<div class="notice">✗ 测试请求失败：${esc(e.message)}</div>`;
     log(`测试请求失败 — ${e.message}`);
   } finally {
-    btn.disabled = false; btn.innerHTML = "测试连接";
+    if (btn && btn.disabled !== undefined) { btn.disabled = false; }
+  }
+}
+
+/* ---------- E2B Key（云端沙箱共用，不分方案） ---------- */
+async function saveE2BKey() {
+  const k = document.getElementById("set-e2b-key").value.trim();
+  if (!k) { log("请先填写 E2B API Key（留空 = 保持不变）"); return; }
+  try {
+    settingsCache = await api("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ e2b_api_key: k }),
+    });
+    log("E2B API Key 已保存");
+    renderSettingsPage();
+  } catch (e) {
+    alertModal("保存失败", e.message);
+  }
+}
+
+async function clearE2BKey() {
+  try {
+    settingsCache = await api("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ e2b_api_key: "-" }),
+    });
+    log("E2B API Key 已清除");
+    renderSettingsPage();
+  } catch (e) {
+    alertModal("清除失败", e.message);
   }
 }
 

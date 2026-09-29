@@ -159,11 +159,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/samples", s.method("GET", s.handleSamples))
 	// M8-C9：误报标记记忆降噪（写操作受认证保护；标记属于写语义）
 	s.mux.HandleFunc("/api/fp-marks", s.fpMarksMethod(s.handleListFPMarks, s.handleDeleteFPMark))
-	// M8-设置中心：GET 公开读（密钥只回脱敏提示），POST 保存（writeAuth 保护）；
+	// M8-设置中心：GET 公开读（密钥只回脱敏提示），POST 仅 E2B key（写，受认证）；
 	// 同 pattern 必须合并注册（ServeMux 不允许重复 pattern，见 handleTaskRoutes 注释）。
 	// /api/settings/test 真实外呼 LLM（max_tokens=1），额外包提交限流。
 	s.mux.HandleFunc("/api/settings", s.settingsMethod(s.handleGetSettings, s.handleSaveSettings))
 	s.mux.Handle("/api/settings/test", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleTestSettings))))
+	// M8-设置中心 v2：多方案 CRUD（POST /profiles 精确匹配创建；/profiles/ 子树
+	// 处理 {id} 更新/删除、{id}/current 设当前、reset 重置）。写操作受 writeAuth。
+	s.mux.HandleFunc("/api/settings/profiles", s.method("POST", s.handleCreateProfile))
+	s.mux.HandleFunc("/api/settings/profiles/", s.handleProfileRoutes)
 }
 
 // settingsMethod 设置端点：GET=脱敏视图（公开读），POST=保存（写，受认证）。

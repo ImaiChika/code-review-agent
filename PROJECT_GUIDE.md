@@ -120,19 +120,19 @@
 
 系统内置的规则审查**不需要任何 AI、不花一分钱**。如果你想再让大模型把可疑问题复核一遍、生成更具体的修复建议，需要配置一次模型：
 
-1. 左侧 **「03 智能与配置」→「模型与密钥」**。
-2. 选服务商（如"通义千问 · 阿里云百炼"），Base URL 会自动填好。
-3. 填模型名（如 `qwen3.8-flash`）和你的 API Key，点 **「保存设置」**。
-4. 点 **「测试连接」**——只花 1 个 token，显示"✓ 连接成功"就配好了。
+1. 左侧 **「03 智能与配置」→「模型与密钥」**。系统已预置 6 个方案：**DeepSeek、通义千问、智谱 GLM、Kimi、OpenAI、MiMo**（最多可建 10 个方案，也能自定义名字和端点）。
+2. 点开一个方案（默认展示"当前方案"），填上你的 API Key，点 **「保存修改」**。
+3. 点 **「测试连接」**——只花 1 个 token，显示"✓ 连接成功"就配好了。
+4. 点方案详情最下方的 **「选择作为当前配置」**——之后审查就用它，重新登录也优先展示它。
 
-配好之后，到"新建审查"页勾选 **「LLM 复核降噪」** 才会用 AI。**不勾就不花钱**，审查结果和以前完全一样。
+配好之后，到"新建审查"页勾选 **「LLM 复核降噪」** 才会用 AI。**不勾就不花钱**，审查结果和以前完全一样。想换模型？在方案列表里点另一张卡片、设为当前即可。
 
 **关于花钱，只需要记住三条**：
 - 复核开关默认关闭，每次审查手动勾选；
 - 一次复核把所有候选问题打包成一次请求，通常只花几百 token（flash 级模型约几厘钱）；
 - 密钥保存在服务器本机数据库里，界面上永远只显示尾号（如 `…msNw`），别人看不到完整 key。
 
-E2B 云沙箱的 API Key 也在同一页配置（想让"仓库路径"审查跑在云端沙箱时用）。
+E2B 云沙箱的 API Key 在设置页单独一栏配置（不分方案，云端沙箱共用；想让"仓库路径"审查跑在云端沙箱时用）。
 
 ---
 
@@ -243,7 +243,7 @@ PORT=9090 scripts/start.sh   # 自定义端口
 ```
 
 - **前端**：内嵌二进制的 SPA（`server/web/`，go:embed，无外部依赖），四个视图——总览看板 / 新建审查（一键载入 `testdata` 示例）/ 任务记录 / 规则引擎（含评分维度与业务管线展示）。
-- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**；**M8-设置中心起支持 `sandbox_backend`（local/container/container-fx/e2b）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护；`?llm_mode=` 查询参数开复核）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`、**M8-设置中心**：`GET/POST /api/settings`（LLM/E2B 运行时配置，GET 公开但密钥只回尾号提示，POST 受认证）、`POST /api/settings/test`（最小连通性测试，max_tokens=1，常见错误映射为用户可读提示）、`GET/DELETE /api/fp-marks`（误报记忆管理）。
+- **API**：`GET /api/health`、`POST /api/reviews`（**M7-F1 起异步**：入队即返回 `202 + {task_id, status:"queued"}`，结果轮询 `GET /api/tasks/{id}`；非法输入 400 / 无新增行 422 仍同步返回；**M7-F2 起受 IP 限流与可选认证保护**；**M7-F3 起支持 `files_content`（粘贴整文件）与 `pr_url`（GitHub PR）**；**M8-设置中心起支持 `sandbox_backend`（local/container/container-fx/e2b）**）、`POST /api/reviews/upload`（M7-F3 multipart：多文本文件或单个 zip，zip-slip/条目数/解压大小三重防护；`?llm_mode=` 查询参数开复核）、`GET /api/tasks`、`GET /api/tasks/{id}`（queued/running 进行中态由内存注册表提供，`report` 为 null；failed 任务含 `error_msg`）、`GET /api/tasks/{id}/report`、`GET /api/stats`、`GET /api/rules`、`GET /api/samples`、**M8-设置中心**：`GET/POST /api/settings`（LLM/E2B 运行时配置，GET 公开但密钥只回尾号提示，POST 受认证）、`POST /api/settings/test`（最小连通性测试，max_tokens=1，常见错误映射为用户可读提示）、`GET/DELETE /api/fp-marks`（误报记忆管理）、**M8-设置中心 v2 多方案**：`POST /api/settings/profiles`（新建，上限 10 个满则 400）、`POST/DELETE /api/settings/profiles/{id}`（更新/删除）、`POST /api/settings/profiles/{id}/current`（设当前）、`POST /api/settings/profiles/reset`（重置出厂，同服务商密钥保留）。
 - **架构关键**：CLI 与 API 共用 `review.Run()` 同一条管线，前端展示的就是真实业务逻辑；单二进制分发。
 - **异步队列（M7-F1）**：`server/queue.go` worker 池（`--queue-workers`，默认 1 串行=SQLite 单写最稳，HTTP 已不被彼此阻塞）；单任务看门狗 `--task-timeout`（默认 10m，超时标 failed 并经 `CreateFailedTask` 补记 DB）；进行中状态在内存注册表（服务重启丢失未完成任务属预期）；runFn 可注入支撑状态机单测；runFn panic 被兜住不影响服务。
 - **认证与边界（M7-F2）**：`server/auth.go`——`--auth-token` 启用写保护（读公开，前端 `?token=<token>` 链接自动保存）；IP 令牌桶限流（2 req/s burst 10）只包提交端点；请求体 ≤10MB（413）；安全响应头 + 连接层超时。全部默认关闭/宽松，不改变旧行为。
@@ -748,6 +748,7 @@ rules:
 > - 🧪 **M8 中期全量回归测试（2026-09-29，对照 C3/C9 完成后的现状）**：按本文档 §二 流程逐层实测——① 静态门禁：build / vet / gofmt / 13 包 `-race` / 数据集门禁（39 样本 100%/100%/0%、脱敏 0 泄漏）全绿；② CLI：diff-file / dry-run / `--files` / `--fake-model` / repo-path+local 沙箱（go vet/test 真跑、staticcheck 未装优雅记录）/ 三类错误路径 exit code 语义正确；③ API 全端点：202 异步、422（纯上下文）、400（空 body/坏 repo）、上传多文件+zip 穿越拒绝、真实 GitHub PR（octocat/Hello-World#1）、fp-marks 标记→降级（0.9→0.45）→撤销→恢复闭环、stats/trend 准确；④ 安全边界：401/双 token 头/读公开/限流 10+429(Retry-After)/10MB+413/白名单内外+穿越+相似前缀 403；⑤ 前端浏览器走查（新用户视角）：四视图、5 输入 tab 全部实测、token 链接自动保存并清地址栏、HTML 报告新标签打开、脱敏展示（REDACTED）、布局程序化审计（无溢出/重叠/截断）；⑥ MCP stdio：initialize/tools/code_review（检出密钥）/list 全通。**发现并修复 4 项**：verbose 双重汇总输出（删 Step 8 重复块）、Version 停留 1.0.0（→1.2.0-dev）、P3-13 completed_at/duration 落库（+回归测试）、任务详情"全部"筛选不含警告（只警告任务显示为空，现合并显示并带"警告"徽章）。修后 13 包 `-race` 全绿、数据集门禁不回退、实机逐项复验。环境备注：本会话模型与视觉评审通道均不支持图片输入，视觉验收改为 DOM 断言+布局几何审计+截图存档（`t01`~`t07`）。
 > - ✅ **E6/E7 设置中心 + 树状导航完成（2026-09-30，用户插入需求）**：① **设置中心**——`cr_settings` KV 表（storage +4 方法）；`GET/POST /api/settings`（同 pattern 合并注册防 ServeMux panic，GET 公开但**密钥永不回明文**只回尾号提示，POST `"-"` 语义清除）；`POST /api/settings/test`（max_tokens=1 真实连通性测试，401/403/404/429/超时/不可达全部映射用户可读提示，额外包 IP 限流）；`review.Options` 新增 `LLMAPIKey`/`E2BAPIKey`（设置中心 > 环境变量），`buildLLMModel` 与 E2B 沙箱构造同步改造；`POST /api/reviews` 新增 `sandbox_backend` 白名单校验（e2b 无 key 时 400 + 引导提示，不静默回退）。② **前端**——侧栏改两级树状导航（总览看板 / 审查中心→新建审查+任务记录 / 智能与配置→模型与密钥+误报记忆 / 规则引擎；展开态 localStorage 持久化 + 激活路径追踪）；「模型与密钥」视图（服务商选择自动填 Base URL、脱敏徽章、清除、测试连接按钮、安全与成本说明面板）；「误报记忆」管理页（列表/撤销闭环 C9）；审查表单 LLM 复核开关（默认关）与沙箱后端下拉（e2b 未配置置灰）。③ **可观测**——`Monitor.LLMError` 字段，LLM 调用失败时前端橙条提示"已保留规则结果"并引导去设置页。测试：storage +1、server +3（脱敏/清除/错误映射/e2b 预检）；13 包 `-race` 全绿。**实机验证（真实 qwen3.8-flash）**：测试连接 ✓（1 token，3.1s）；一次示例审查 LLM 复核端到端 ✓（送审 2 · 剔除 0 · 建议 2，LLM 建议为针对性修复文案）；坏 key→401 提示、坏模型名→404 提示、坏模型名下审查→橙色降级警告条。**过程中抓到并修复**：viewFPMarks 模板误用逗号运算符导致首个 panel 被丢弃（快照验证发现）。
 > - 📌 **LLM 成本纪律（2026-09-30 起生效，详见 §7.6）**：API Key 配置后所有 LLM 用量须按最低成本原则执行。
+> - ✅ **E6 v2 多方案升级完成（2026-09-30，同日用户需求）**：方案模型（自定义名称区分、非服务商区分；出厂预置 6 家——DeepSeek/千问/GLM/Kimi/OpenAI/MiMo，MiMo 端点经检索核实为 `api.xiaomimimo.com/v1`；上限 10 个，创建满 400 + 前端模态框拒绝；删除按钮置于方案详情最底部，确认弹窗；「选择作为当前配置」持久化于服务端，重新登录优先展示当前方案；重置出厂时同服务商密钥保留、当前为出厂方案则延续）。存储 `llm_profiles` JSON + `llm_current` 两键，**旧单配置懒迁移**（迁移进对应出厂方案并设为当前、旧键删除）。**测试抓到关键缺陷**：`LLMProfile.APIKey` 带 `json:"-"` 导致整包序列化时密钥被静默丢弃（存储层改用带 `api_key` 标签的 storedLLMProfile DTO 修复）——单测 TestProfilesUpdateCurrentDelete 首跑即红。测试：server +5 用例（迁移/上限/更新设当前删除/重置/测试端点 profile_id 回退）；浏览器实测：迁移后千问 key 保留（尾号 msNw）、切换当前刷新持久、10 上限弹窗、删除/重置确认弹窗、重置后 key 保留、真实测试连接 2s、审查页就绪提示联动；布局审计无溢出。
 > - 🔑 **密钥持久化（2026-09-30）**：千问（dashscope/qwen3.8-flash）与 E2B 两把 key 已双写持久化——`cr_settings` 表（服务真相源，网页设置中心管理）+ `.env`（gitignored 镜像备份，docker compose 透传 `OPENAI_API_KEY`/`E2B_API_KEY`）。**测试/清理现场时禁止删除或覆盖 `review.db` 与 `.env`**（此前"恢复现场"流程会回滚 review.db，恢复前必须先备份 cr_settings）。E2B key 已真机验证：最小沙箱跑通 + 服务端 API 端到端（规则 3 findings + e2b 后端 go vet exit 0；go test/staticcheck 127 为已知默认模板无 Go 工具链，需 E2B_TEMPLATE）。云端多用户迁移（每用户上传自己的密钥）登记为 E8。
 > - ⏭ 下一步：D3 go/types 类型增强（repo 模式加载类型信息，RES/ERR 规则从"猜"变"知道"）。
 
@@ -819,7 +820,7 @@ rules:
 | E3 | 趋势统计 API → M7-F5 | 按天聚合任务数、评分分布、规则命中 TopN（SQL 聚合，顺带修 P2-11） | S |
 | E4 | 规则管理 API | 规则列表 / YAML 校验 / 单 diff 试跑 | M |
 | E5 | 部署形态 → M7-F7 | 单二进制内嵌前端（✅ 已实现）；Docker compose（服务 + 数据卷）+ TLS 反代与备份文档 | S |
-| E6 | 设置中心（模型与密钥）✅（2026-09-30，M8 插入） | `cr_settings` KV 表 + `GET/POST /api/settings`（密钥只回尾号提示，"-" 清除）+ `POST /api/settings/test`（max_tokens=1 连通性测试，401/404/429/超时映射用户可读提示）；运行时注入 `review.Options.LLMAPIKey/E2BAPIKey`（设置中心 > 环境变量）；前端「模型与密钥」视图含安全/成本说明 | M |
+| E6 | 设置中心（模型与密钥）✅（2026-09-30，M8 插入，同日升级 v2 多方案） | `cr_settings` KV 表；**v2：多方案模型**（出厂预置 DeepSeek/千问/GLM/Kimi/OpenAI/MiMo，上限 10 个，自定义命名，当前方案服务端持久化，旧单配置懒迁移，重置保留同服务商密钥）+ `POST /api/settings/test`（max_tokens=1 连通性测试，401/404/429/超时映射用户可读提示）；运行时注入 `review.Options.LLMAPIKey/E2BAPIKey`（当前方案 > 环境变量）；前端「模型与密钥」视图（方案卡片/详情/设为当前/删除/重置/模态框）含安全/成本说明 | M |
 | E7 | 树状导航 + 误报记忆管理页 ✅（2026-09-30，M8 插入） | 侧栏两级分组（总览看板 / 审查中心 / 智能与配置 / 规则引擎），展开状态 localStorage 持久化 + 激活路径追踪；新增「误报记忆」视图（列表/撤销，闭环 C9）；审查表单 LLM 复核开关（默认关）与沙箱后端下拉 | M |
 | E8 | 多用户密钥隔离（云端迁移预留） | 现状：key 是服务器全局的（单机自部署合理）。迁移云端后改为**每个用户上传自己的密钥**：用户表 + 密钥列（服务端加密存储，接口永不回明文）、审查按提交者取 key、管理页显示各自用量；同步引入计费/限额（配合 §7.6 第 8 条）。触发时机：对外多租户服务化（C7 PR 机器人）落地时 | L |
 
