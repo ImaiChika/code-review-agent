@@ -65,9 +65,13 @@ func buildLLMModel(opts Options) (model.Model, error) {
 		}
 		return fm, nil
 	case "openai":
-		apiKey := os.Getenv("OPENAI_API_KEY")
+		// key 来源优先级：调用方显式注入（设置中心）> OPENAI_API_KEY 环境变量
+		apiKey := opts.LLMAPIKey
 		if apiKey == "" {
-			return nil, errors.New("openai 复核需要 OPENAI_API_KEY 环境变量")
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if apiKey == "" {
+			return nil, errors.New("openai 复核需要 API Key（设置中心配置或 OPENAI_API_KEY 环境变量）")
 		}
 		name := opts.LLMModelName
 		if name == "" {
@@ -118,7 +122,9 @@ type Options struct {
 	LLMMode          string              // LLM 复核模式（M4）："fake"（确定性回放）/ "openai"（兼容 API）；空 = 关闭
 	LLMModelName     string              // openai 模式模型名（默认 gpt-4o-mini）
 	LLMBaseURL       string              // openai 兼容端点（ollama: http://localhost:11434/v1）
+	LLMAPIKey        string              // openai 模式 API Key（设置中心注入；空 = 回退 OPENAI_API_KEY 环境变量）
 	LLMFakeResponses []string            // fake 模式的预设判定响应（按序回放；空 = 默认全 CONFIRM；测试/脚本用）
+	E2BAPIKey        string              // e2b 云沙箱 API Key（设置中心注入；空 = 回退 E2B_API_KEY 环境变量）
 	AuditFile        string              // 审计日志路径；空 = 默认 tool_safety_audit.jsonl 落 OutputDir
 	SkillsDir        string              // CR Skill 目录（M1-B1；空 = 自动探测 ./skills，找不到则报告不含 skill 元数据）
 	InputLabel       string              // 输入来源标签（M7-F3；非空时覆盖报告/落库的 input_path，如 PR 链接、上传文件清单）
@@ -320,16 +326,19 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	// 注：报告对象在 Step 6 才创建，复核统计先存局部变量
 	var llmMode string
 	var llmReviewed, llmDropped, llmSuggested int
+	var llmErrMsg string // 复核/建议调用失败原因（前端提示"已保留规则结果"用）
 	if opts.LLMMode != "" {
 		llmMode = opts.LLMMode
 		mdl, merr := buildLLMModel(opts)
 		if merr != nil {
+			llmErrMsg = merr.Error()
 			log.Printf("⚠️ LLM 复核未启用: %v", merr)
 		} else {
 			kept, stats := llmreview.Review(ctx, mdl, dedupResult.Findings)
 			dedupResult.Findings = kept
 			llmReviewed, llmDropped = stats.Reviewed, stats.Dropped
 			if stats.Error != "" {
+				llmErrMsg = stats.Error
 				log.Printf("⚠️ LLM 复核失败（保守保留全部候选）: %s", stats.Error)
 			}
 			if opts.Verbose {
@@ -347,6 +356,9 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 				}
 			}
 			if sstats.Error != "" {
+				if llmErrMsg == "" {
+					llmErrMsg = "建议生成失败: " + sstats.Error
+				}
 				log.Printf("⚠️ LLM 建议生成失败（保留静态建议）: %s", sstats.Error)
 			}
 			if opts.Verbose {
@@ -393,6 +405,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport.Monitor.LLMReviewed = llmReviewed
 	reviewReport.Monitor.LLMDropped = llmDropped
 	reviewReport.Monitor.LLMSuggested = llmSuggested // M8-C3
+	reviewReport.Monitor.LLMError = llmErrMsg        // M8-设置中心：前端据此提示"已保留规则结果"
 	reviewReport.Monitor.RiskScore = riskScore.Score
 	reviewReport.Monitor.RiskGrade = riskScore.Grade
 	reviewReport.Monitor.RiskBreakdown = riskScore.Breakdown // M7-F6：HTML 报告六维图
@@ -631,9 +644,14 @@ func runSandbox(ctx context.Context, opts Options, sandboxMode, taskID string, c
 			}
 		}
 	case "e2b":
-		// M3-B4：E2B 云沙箱（需 E2B_API_KEY；默认模板无 Go 工具链，需 E2B_TEMPLATE）
+		// M3-B4：E2B 云沙箱（key 来源：设置中心注入 > E2B_API_KEY 环境变量；
+		// 默认模板无 Go 工具链，需 E2B_TEMPLATE）
 		var err error
-		sb, err = sandbox.NewE2BSandbox()
+		if opts.E2BAPIKey != "" {
+			sb, err = sandbox.NewE2BSandboxWithKey(opts.E2BAPIKey)
+		} else {
+			sb, err = sandbox.NewE2BSandbox()
+		}
 		if err != nil {
 			log.Printf("⚠️ 创建 E2B 沙箱失败，回退到本地: %v", err)
 			c.exceptions++

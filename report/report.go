@@ -114,6 +114,7 @@ type MonitorInfo struct {
 	LLMReviewed       int                          `json:"llm_reviewed"`             // 送审候选数（M4-C1）
 	LLMDropped        int                          `json:"llm_dropped"`              // LLM 否决剔除数（M4-C1）
 	LLMSuggested      int                          `json:"llm_suggested,omitempty"`  // LLM 修复建议生成数（M8-C3）
+	LLMError          string                       `json:"llm_error,omitempty"`      // LLM 调用失败原因（M8：复核失败保守保留规则结果，前端提示用）
 	RiskScore         float64                      `json:"risk_score"`               // 风险评分
 	RiskGrade         string                       `json:"risk_grade"`               // 风险等级
 	RiskBreakdown     map[string]scoring.Dimension `json:"risk_breakdown,omitempty"` // M7-F6：六维得分（HTML 报告用）

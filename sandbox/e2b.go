@@ -36,11 +36,16 @@ type E2BSandbox struct {
 	stagedSrc string // 已上传的本地仓库路径（避免重复 staging）
 }
 
-// NewE2BSandbox 创建 E2B 云沙箱。
+// NewE2BSandbox 创建 E2B 云沙箱（key 取 E2B_API_KEY 环境变量）。
 //
 // 模板选择：E2B_TEMPLATE 环境变量（默认框架内置模板，无 Go 工具链）。
 func NewE2BSandbox() (*E2BSandbox, error) {
-	apiKey := os.Getenv("E2B_API_KEY")
+	return NewE2BSandboxWithKey(os.Getenv("E2B_API_KEY"))
+}
+
+// NewE2BSandboxWithKey 创建 E2B 云沙箱并显式注入 API Key（设置中心用）。
+// key 为空时返回错误，由调用方降级 container → local。
+func NewE2BSandboxWithKey(apiKey string) (*E2BSandbox, error) {
 	if apiKey == "" {
 		return nil, errors.New("E2B_API_KEY 未设置，无法使用 E2B 云沙箱")
 	}

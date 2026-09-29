@@ -159,6 +159,32 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/samples", s.method("GET", s.handleSamples))
 	// M8-C9：误报标记记忆降噪（写操作受认证保护；标记属于写语义）
 	s.mux.HandleFunc("/api/fp-marks", s.fpMarksMethod(s.handleListFPMarks, s.handleDeleteFPMark))
+	// M8-设置中心：GET 公开读（密钥只回脱敏提示），POST 保存（writeAuth 保护）；
+	// 同 pattern 必须合并注册（ServeMux 不允许重复 pattern，见 handleTaskRoutes 注释）。
+	// /api/settings/test 真实外呼 LLM（max_tokens=1），额外包提交限流。
+	s.mux.HandleFunc("/api/settings", s.settingsMethod(s.handleGetSettings, s.handleSaveSettings))
+	s.mux.Handle("/api/settings/test", s.limiter.limitSubmit(http.HandlerFunc(s.method("POST", s.handleTestSettings))))
+}
+
+// settingsMethod 设置端点：GET=脱敏视图（公开读），POST=保存（写，受认证）。
+func (s *Server) settingsMethod(getH, postH http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getH(w, r)
+		case http.MethodPost:
+			// 与全局 writeAuth 同语义：配置了 token 且不匹配时拒绝
+			if s.cfg.AuthToken != "" &&
+				subtle.ConstantTimeCompare([]byte(extractToken(r)), []byte(s.cfg.AuthToken)) != 1 {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="code-review-agent"`)
+				writeErr(w, http.StatusUnauthorized, "需要认证才能修改设置")
+				return
+			}
+			postH(w, r)
+		default:
+			writeErr(w, http.StatusMethodNotAllowed, "需要 GET 或 POST 方法")
+		}
+	}
 }
 
 // fpMarksMethod 误报标记端点：GET=列表（公开读），DELETE=撤销（写，受认证）。
@@ -251,12 +277,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // createReviewRequest POST /api/reviews 请求体。
 type createReviewRequest struct {
-	DiffContent  string            `json:"diff_content"`  // diff 文本（与 repo_path / files_content / pr_url 四选一）
-	RepoPath     string            `json:"repo_path"`     // git 仓库路径（取未提交变更，服务器本地）
-	FilesContent map[string]string `json:"files_content"` // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
-	PrURL        string            `json:"pr_url"`        // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
-	Sandbox      bool              `json:"sandbox"`       // 是否执行沙箱（仅 repo_path 有效）
-	LLMMode      string            `json:"llm_mode"`      // LLM 复核（M4）："fake" 确定性回放 / "openai"（服务端需 OPENAI_API_KEY）
+	DiffContent    string            `json:"diff_content"`    // diff 文本（与 repo_path / files_content / pr_url 四选一）
+	RepoPath       string            `json:"repo_path"`       // git 仓库路径（取未提交变更，服务器本地）
+	FilesContent   map[string]string `json:"files_content"`   // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
+	PrURL          string            `json:"pr_url"`          // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
+	Sandbox        bool              `json:"sandbox"`         // 是否执行沙箱（仅 repo_path 有效）
+	SandboxBackend string            `json:"sandbox_backend"` // M8-设置中心：local / container / container-fx / e2b；空 = 服务默认
+	LLMMode        string            `json:"llm_mode"`        // LLM 复核（M4）："fake" 确定性回放 / "openai"；空 = 关闭
+}
+
+// allowedSandboxBackends 沙箱后端白名单（防止任意字符串进沙箱构造器）。
+var allowedSandboxBackends = map[string]bool{
+	"local": true, "container": true, "container-fx": true, "e2b": true,
 }
 
 // preflightAddedLines 检查解析出的文件里确有新增行（M7-F1 预检语义）。
@@ -393,16 +425,33 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 沙箱策略：默认关闭；显式要求且给了仓库路径时启用
+	// 沙箱策略：默认关闭；显式要求且给了仓库路径时启用。
+	// M8-设置中心：可按请求指定后端（白名单校验），缺省用服务默认。
 	sandboxMode := review.SandboxOff
 	if req.Sandbox && req.RepoPath != "" {
-		sandboxMode = s.cfg.SandboxMode
-		if sandboxMode == "" || sandboxMode == review.SandboxOff {
-			sandboxMode = "local"
+		if req.SandboxBackend != "" {
+			if !allowedSandboxBackends[req.SandboxBackend] {
+				writeErr(w, http.StatusBadRequest, "不支持的沙箱后端: "+req.SandboxBackend+"（可选 local/container/container-fx/e2b）")
+				return
+			}
+			sandboxMode = req.SandboxBackend
+		} else {
+			sandboxMode = s.cfg.SandboxMode
+			if sandboxMode == "" || sandboxMode == review.SandboxOff {
+				sandboxMode = "local"
+			}
+		}
+		// 选了 e2b 但没有 key：直接给可操作提示，而不是执行期静默回退
+		if sandboxMode == "e2b" {
+			if key, _ := s.resolveE2BKey(); key == "" {
+				writeErr(w, http.StatusBadRequest, "尚未配置 E2B API Key：请到「智能与配置 → 模型与密钥」填写后重试")
+				return
+			}
 		}
 	}
 
-	// M7-F1：任务 ID 在入队时预分配（202 响应与 review.Run 落库用同一个）
+	// M8-设置中心：任务 ID 在入队时预分配（202 响应与 review.Run 落库用同一个），
+	// 设置中心生效配置（LLM key/base/model、E2B key）统一由 injectSettings 注入
 	taskID := review.NewTaskID()
 	job := &queuedJob{
 		id:        taskID,
@@ -422,6 +471,10 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 			SandboxMode:  sandboxMode,
 			AuditFile:    "tool_safety_audit.jsonl",
 		},
+	}
+	if err := s.injectSettings(&job.opts); err != nil {
+		writeErr(w, http.StatusInternalServerError, "读取设置失败: "+err.Error())
+		return
 	}
 	if err := s.queue.submit(job); err != nil {
 		status := http.StatusInternalServerError
@@ -483,6 +536,14 @@ func (s *Server) handleUploadReview(w http.ResponseWriter, r *http.Request) {
 			SandboxMode:  review.SandboxOff,
 			AuditFile:    "tool_safety_audit.jsonl",
 		},
+	}
+	// M8-设置中心：上传审查同样支持 LLM 复核开关（?llm_mode=openai）+ 设置注入
+	if r.URL.Query().Get("llm_mode") != "" {
+		job.opts.LLMMode = r.URL.Query().Get("llm_mode")
+	}
+	if err := s.injectSettings(&job.opts); err != nil {
+		writeErr(w, http.StatusInternalServerError, "读取设置失败: "+err.Error())
+		return
 	}
 	if err := s.queue.submit(job); err != nil {
 		status := http.StatusInternalServerError

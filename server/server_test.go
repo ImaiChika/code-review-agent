@@ -40,8 +40,12 @@ func newTestServer(t *testing.T) *httptest.Server {
 		ts.Close()
 		_ = s.Close()
 	})
+	testServerStore = s.store
 	return ts
 }
+
+// testServerStore 最近一次 newTestServer 创建的 store（同包测试辅助，串行用例下安全）。
+var testServerStore storage.Store
 
 const sampleSecretDiff = `--- a/creds.go
 +++ b/creds.go
