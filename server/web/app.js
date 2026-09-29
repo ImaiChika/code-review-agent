@@ -509,7 +509,7 @@ function findingHTML(f, idx, taskID) {
   return `
   <div class="finding f-${esc(f.severity)}" id="fd-${idx}">
     <div class="finding-head" onclick="document.getElementById('fd-${idx}').classList.toggle('open')">
-      ${badge(f.severity)}
+      ${badge(f.severity)}${f._warn ? '<span class="badge low">警告</span>' : ""}
       <span class="f-loc">${esc(f.file)}:${f.line}</span>
       <span class="f-title">${esc(f.title)}</span>
       <span class="f-conf">conf ${Number(f.confidence).toFixed(2)} · ${esc(f.rule_id)}</span>
@@ -709,7 +709,9 @@ function renderFindings() {
   const wrap = document.getElementById("findings-wrap");
   if (!wrap) return;
   let list = [];
-  if (taskSevFilter === "all") list = rep.findings;
+  // "全部"同时含发现与警告：只有警告的任务在默认筛选下不再显示为空；
+  // 警告条目带 _warn 标记，与正式发现可区分
+  if (taskSevFilter === "all") list = [...rep.findings, ...rep.warnings.map(w => ({ ...w, _warn: true }))];
   else if (taskSevFilter === "warning") list = rep.warnings;
   else list = rep.findings.filter(f => f.severity === taskSevFilter);
 
