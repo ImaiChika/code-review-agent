@@ -429,7 +429,7 @@ rules:
 | 精确率（误报率） | 100% / 0%（hard2 盲评曾抓出构造器误报并已修复） | ≥ 92% / ≤ 8% |
 | 敏感信息脱敏 | 0 泄漏，硬门禁 PASS（含前端展开态 DOM 实测） | 维持 0 泄漏硬门禁 |
 | 框架接入 | **6 处真接入**：skill 真加载 / 权限走框架 policy / artifact 入库 / OTel span / container 子模块沙箱 / e2b 云沙箱 | skill run 脚本执行（B7）、session/sqlite 会话化（B8） |
-| LLM 能力 | `--fake-model` 确定性模式 + LLM 复核降噪（默认关闭、可开关） | C3 修复建议生成 + 真模型 precision 对照 |
+| LLM 能力 | `--fake-model` 确定性模式 + LLM 复核降噪 + **C3 修复建议生成**（默认关闭、可开关、fake 可复现） | 真模型 precision 对照（待有 key 环境） |
 | 服务形态 | CLI + Web 控制台 + MCP stdio；**M7 全部落地**：异步队列（1ms 202）/ 认证限流 / 白名单 / 零门槛输入×5 / 趋势看板 / HTML 报告 / Docker compose（实机验证在 CI） | **M8**：LLM 修复建议、记忆降噪、类型增强、跨函数分析 |
 | CI / 自举 | GitHub Actions 实跑全绿：gofmt/vet/test-race/数据集门禁/提交校验 + 自举审查 | 维持门禁纪律 |
 | 提交规范 | hooks + CI 双层校验 | Conventional Commits 强制，不合规不合入 |
@@ -615,7 +615,7 @@ rules:
 
 | 任务 | 产出 |
 |------|------|
-| C3 LLM 修复建议 | 每条 finding 生成补丁式修复建议（llmreview 批量协议扩展），`--fake-model` 可复现、默认关闭 |
+| C3 LLM 修复建议 ✅（2026-09-29） | 每条 finding 生成补丁式修复建议（llmreview 批量协议扩展），`--fake-model` 可复现、默认关闭 |
 | C9 记忆降噪 | 前端"标记误报"落库（规则 × 文件模式），同模式再报自动降置信度入 warnings；后续升级 `memory/sqlitevec` |
 | D3 go/types 类型增强 | repo 模式加载类型信息：句柄是否 `io.Closer`、函数真实返回签名——RES/ERR 规则从"猜"变"知道" |
 | D7 增量审查 | 同 repo 只审上次之后的新变更，任务详情给出"新增/复发/已消失"对比视图 |
