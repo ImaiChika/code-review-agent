@@ -85,6 +85,36 @@
 - **检测**: `exec.Command / exec.CommandContext` 的可执行文件参数是变量；或可执行文件为 shell 字面量（sh/bash/zsh/ksh/cmd/powershell）但后续参数（如 `-c` 脚本）来自变量；`syscall.Exec` 任一参数动态
 - **豁免**: 全字面量调用（`exec.Command("ls", "-la")`、`sh -c "echo hi"`）
 
+### SEC-AST-005: Token 感知的 TLS 校验关闭检测（R2）
+
+- **严重度/分类**: high / security
+- **检测**: `InsecureSkipVerify: true`
+- **豁免**: 注释行
+
+### CTX-AST-002: Token 感知的 context 根替换检测（R2）
+
+- **严重度/分类**: low(0.70)/ concurrency
+- **检测**: 签名参数带 `context.Context` 的函数体内使用 `context.Background()/TODO()`
+- **豁免**: 签名不带 ctx 参数（根 context 合法）；返回值位置的 context.Context 不算；_test.go
+
+### CON-AST-001: Token 感知的 mutex 配对检测（R2）
+
+- **严重度/分类**: medium / concurrency
+- **检测**: `.Lock()` 的接收者在全部新增行中无 `.Unlock()`
+- **豁免**: `defer mu.Unlock()`；RLock/RUnlock 读锁单独配对（`.Lock(` 不会匹配 `.RLock(`）
+
+### RES-AST-002: Token 感知的循环 defer 与 timer 泄漏检测（R2）
+
+- **严重度/分类**: medium（time.Tick 为 low）/ resource
+- **检测**: defer 出现在 for 循环体内（花括号深度跟踪）；`time.Tick(`（无法 Stop）；`NewTimer/NewTicker` 变量无 `.Stop()`
+- **豁免**: 循环外 defer；`defer t.Stop()`
+
+### DB-AST-002: Token 感知的 rows.Err 检测（R2）
+
+- **严重度/分类**: medium / lifecycle
+- **检测**: `rows, err := ...Query(` 后全部新增行无 `rows.Err()`
+- **豁免**: 已检查 rows.Err()（迭代中途的 IO 错误只能靠它捕获）
+
 ## YAML 自定义规则
 
 ### 规则文件格式

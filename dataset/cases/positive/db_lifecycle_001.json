@@ -1,10 +1,19 @@
 {
   "id": "db_lifecycle_001",
-  "description": "db.Query 返回的 rows 没有 Close（数据库生命周期问题）",
+  "description": "db.Query 返回的 rows 没有 Close（数据库生命周期问题）；R1 后扩写：rows 迭代无 rows.Err() 亦为期望命中（DB-AST-002，见 §8.5 第 5 步注记）",
   "category": "lifecycle",
   "difficulty": "medium",
   "expected_findings": [
-    {"rule_id": "RES-AST-001", "file": "repo.go", "line": 4}
+    {
+      "rule_id": "RES-AST-001",
+      "file": "repo.go",
+      "line": 4
+    },
+    {
+      "rule_id": "DB-AST-002",
+      "file": "repo.go",
+      "line": 4
+    }
   ],
   "expected_warnings": [],
   "sensitive_literals": []

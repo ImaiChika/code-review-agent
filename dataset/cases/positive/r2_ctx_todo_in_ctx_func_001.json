@@ -1,0 +1,11 @@
+{
+  "id": "r2_ctx_todo_in_ctx_func_001",
+  "description": "R2：签名带 ctx 的函数内用 context.TODO()，取消传播断裂（CTX-AST-002）",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "CTX-AST-002", "file": "handler.go", "line": 5}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

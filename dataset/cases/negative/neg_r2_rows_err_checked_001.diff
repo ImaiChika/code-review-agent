@@ -1,0 +1,16 @@
+--- a/dao.go
++++ b/dao.go
+@@ -1,2 +1,12 @@
+ package dao
+ 
++func all() ([]Item, error) {
++	rows, err := db.Query("SELECT id FROM items")
++	if err != nil {
++		return nil, err
++	}
++	defer rows.Close()
++	if err := collect(rows); err != nil {
++		return nil, err
++	}
++	return nil, rows.Err()
++}

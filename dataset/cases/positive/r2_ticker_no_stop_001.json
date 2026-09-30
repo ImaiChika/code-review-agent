@@ -1,0 +1,11 @@
+{
+  "id": "r2_ticker_no_stop_001",
+  "description": "R2：NewTicker 的 ticker 从未 Stop（RES-AST-002）",
+  "category": "resource",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "RES-AST-002", "file": "monitor.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

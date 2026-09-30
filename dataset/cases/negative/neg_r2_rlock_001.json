@@ -1,0 +1,9 @@
+{
+  "id": "neg_r2_rlock_001",
+  "description": "R2 陷阱：读锁 RLock/RUnlock（.Lock() 子串陷阱），CON-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

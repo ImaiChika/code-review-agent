@@ -1,0 +1,11 @@
+{
+  "id": "r2_time_tick_001",
+  "description": "R2：time.Tick 无法 Stop（底层 Ticker 不可回收）（RES-AST-002）",
+  "category": "resource",
+  "difficulty": "easy",
+  "expected_findings": [
+    {"rule_id": "RES-AST-002", "file": "poll.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

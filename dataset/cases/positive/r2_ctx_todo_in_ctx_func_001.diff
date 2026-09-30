@@ -1,0 +1,11 @@
+--- a/handler.go
++++ b/handler.go
+@@ -1,2 +1,7 @@
+ package handler
+ 
++func handle(ctx context.Context, req *Request) error {
++	if req == nil {
++		return use(context.TODO())
++	}
++	return use(ctx)
++}

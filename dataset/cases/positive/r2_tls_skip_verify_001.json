@@ -1,0 +1,11 @@
+{
+  "id": "r2_tls_skip_verify_001",
+  "description": "R2：InsecureSkipVerify: true 关闭 TLS 证书校验（SEC-AST-005）",
+  "category": "security",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-005", "file": "client.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

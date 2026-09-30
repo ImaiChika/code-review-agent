@@ -1,0 +1,9 @@
+--- a/poll.go
++++ b/poll.go
+@@ -1,2 +1,6 @@
+ package poll
+ 
++func poll() {
++	c := time.Tick(time.Minute)
++	use(c)
++}

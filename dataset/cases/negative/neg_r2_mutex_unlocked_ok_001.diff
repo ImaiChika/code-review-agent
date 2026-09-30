@@ -1,0 +1,11 @@
+--- a/store.go
++++ b/store.go
+@@ -1,2 +1,7 @@
+ package store
+ 
++func (s *store) set(k, v string) {
++	s.mu.Lock()
++	s.data[k] = v
++	defer s.mu.Unlock()
++	use(s.data)
++}

@@ -1,0 +1,9 @@
+{
+  "id": "neg_r2_ctx_main_001",
+  "description": "R2 陷阱：函数签名不带 ctx 参数时 context.Background() 合法（根 context），CTX-AST-002 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

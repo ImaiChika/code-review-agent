@@ -1,0 +1,10 @@
+--- a/store.go
++++ b/store.go
+@@ -1,2 +1,7 @@
+ package store
+ 
++func (s *store) get(k string) string {
++	s.mu.RLock()
++	defer s.mu.RUnlock()
++	return s.data[k]
++}

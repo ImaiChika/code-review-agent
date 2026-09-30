@@ -1,0 +1,11 @@
+{
+  "id": "r2_mutex_no_unlock_001",
+  "description": "R2：mu.Lock() 后本次变更内无 Unlock（CON-AST-001）",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "CON-AST-001", "file": "store.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

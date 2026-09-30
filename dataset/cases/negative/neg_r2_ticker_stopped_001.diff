@@ -1,0 +1,10 @@
+--- a/monitor.go
++++ b/monitor.go
+@@ -1,2 +1,7 @@
+ package monitor
+ 
++func watch() {
++	t := time.NewTicker(time.Second)
++	defer t.Stop()
++	use(t.C)
++}

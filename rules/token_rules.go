@@ -661,6 +661,11 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 		return false
 	}
 
+	// R3 提前项：range 循环的 `_` 是惯用占位（for _, v := range …），与错误无关
+	if strings.Contains(content, "range") && strings.Contains(content, "for") {
+		return false
+	}
+
 	// 排除安全的忽略
 	safeIgnores := []string{
 		"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",

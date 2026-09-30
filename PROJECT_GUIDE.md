@@ -759,7 +759,8 @@ rules:
 > - ✅ **体验澄清四连修（2026-09-30，用户实测反馈）**：① **LLM 显示协议名误导**——结果里"LLM 复核 openai"实为 OpenAI 兼容协议名而非服务商；`Monitor.LLMModel` 记录实际模型名（fake 模式记 "fake（确定性回放）"），前端改为显示模型名（实测 "LLM 复核 qwen3.8-flash · 送审 2 · 剔除 2"）。② **沙箱语义不可见**——沙箱选项从"仓库路径"标签内移到全局表单区：非仓库模式开关置灰 + 人话原因（"粘贴/上传/PR 只有变更片段，没有完整工程"），任务详情"沙箱执行"空表也写明原因（按输入类型区分文案）；仓库模式提示将运行的三条命令。③ **任务命名**——`task_name` 全链路（列迁移 task_name / CreateTask / report.task_name / API 入参 + upload `?task_name=`；80 字 rune 截断），任务列表/看板/详情名称优先展示。④ **任务详情去模糊化**——"权限决策"更名"安全审批记录"（帮助文案解释 allow/deny 与留痕语义），监控标签白话化（工具调用→沙箱命令、产物→报告归档、权限拦截→安全拦截），安全审批/执行统计/元数据三项默认折叠进"高级审计信息"。测试：review +1（TaskName+LLMModel）、server +1（task_name 截断透传）；浏览器实测：diff 模式沙箱禁用带原因、详情折叠/展开、名称三处展示、真实 LLM 模型名显示。
 > - ✅ **面向客户的全站文案去黑话（2026-09-30，用户反馈"出厂"徽章不可懂后全量排查）**：① 设置页方案卡片移除"出厂"徽章（预置/自建对用户无意义，均可编辑删除），重置入口改"恢复预置方案"；② 枚举值不再裸奔——输入类型/任务状态/输入路径全面中文化（diff_content→粘贴 DIFF、completed→已完成、api-upload→网页提交；任务列表/详情/Markdown 报告/HTML 报告同套映射 `report.InputTypeLabel/DisplayInputPath`）；③ 看板规则排行显示规则中文名（ID 缩为小字）；业务管线 STEP 描述全部白话（"go/scanner 词法事实匹配"→"扫描新增代码，按规则找出可疑写法"等 8 条）；分类"生命周期"→"数据库事务"；④ "Skill code-review 1.0.0"→"审查引擎"移入高级审计"执行统计"面板（HTML 报告同步）；"已注册规则"→"已加载规则"、"内置"→"系统自带"、"写操作认证"→"认证保护"、"去重移除"→"重复剔除"、Base URL 加悬浮解释。13 包全绿；浏览器逐页验证（设置/看板/规则/列表/详情）。
 > - ✅ **R1 命题缺口批次完成（2026-09-30，§八 R 系列第一批）**：① **CTX-AST-001**（`rules/context_leak.go`）——WithCancel/WithTimeout/WithDeadline/WithCancelCause 四构造提取 cancel 变量名，全量新增行搜 `cancel(`；命名变体 medium/0.75（cancel 可能在未变更代码，hunk 不可见）、`_` 丢弃变体 high/0.85（确定性）。② **SEC-AST-003**（`rules/sql_injection.go`）——SQL 语句形态字面量 + 拼接/Sprintf 双条件；参数化（?/$N）与纯常量拼接豁免。③ **SEC-AST-004**（`rules/command_injection.go`）——可执行文件变量、shell 字面量 + 动态参数、syscall.Exec；全字面量豁免（保住 sandbox_failure fixture）。④ **SEC-AST-002** 扩表（ghu/s/r/glpat-/AIza/npm_/SG./Bearer）+ **mask.go 五正则同步 + gh 前缀补 r**。⑤ 数据集 +13 样本（7 正 + 5 陷阱 + 1 脱敏），**标注先于实现**（首跑 FN=16 门禁红验证标注有效）；修一个样本设计错误（`_, cancel :=` 会与 ERR-AST-001 噪音共报，改 WithDeadline 命名变体，`_` 丢弃留单测）。注册点 5 处（review/server/integration_test/dataset harness）；文档 README/RULES.md/前端管线计数同步（7→10 条）。测试：rules +15 单测（正例/陷阱/豁免/变体/脱敏同步）；门禁 **52 样本 100%/100%/0%**；13 包 `-race` 全绿。
-> - ⏭ 下一步：R2 单行规则批量 → R3 误报抑制①② → D3。
+> - ✅ **R2 单行规则批量完成（2026-09-30，§八 R 系列第二批）**：5 规则落内置（DSL 偏离理由见 §8.4 行内注）——SEC-AST-005（`rules/r2_rules.go`）、CTX-AST-002（签名参数区解析，防 `func f() context.Context` 返回值误判）、CON-AST-001（receiver 提取，RLock 天然不匹配 `.Lock(`）、RES-AST-002（花括号深度跟踪 defer-in-loop + time.Tick + NewTimer/Ticker 无 Stop）、DB-AST-002（rows 惯例命名 + rows.Err 搜索）。**提前落地 R3 一项**：ERR-AST-001 修 `for _, v := range` 的 `_` 被当错误丢弃的误报（r2 样本标注时抓到）。数据集 +13（7 正 + 6 陷阱）；db_lifecycle_001 扩写 DB-AST-002 期望（§8.5 第 5 步注记的首次实践）。测试：rules +13 单测；门禁 **64 样本 100%/100%/0%**；13 包 `-race` 全绿；README/RULES.md/前端管线计数同步（10→15 条）。
+> - ⏭ 下一步：R3 误报抑制①② → D3。
 
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
@@ -872,7 +873,7 @@ rules:
 
 | 指标 | 基线 09-23 | M0 门禁 | M2 门禁 | v1.0 门禁 | 当前实际（09-28） |
 |------|-----------|---------|---------|-----------|---------|
-| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **39**（v1 hard 10 + v1.5 hard2 盲评 9 已入） |
+| 数据集样本数 | 20 | 20 | ≥ 50 | ≥ 60 | **64**（v1 hard 10 + v1.5 hard2 盲评 9 + R1 13 + R2 13 已入） |
 | 检出率 recall | 100% | ≥ 80% | ≥ 85% | ≥ 85% | **100%**（门禁 85%） |
 | 精确率 precision | 100% | ≥ 85% | ≥ 90% | ≥ 90% | **100%**（门禁 90%；hard2 盲评首跑 97%，修复 P2-9 后恢复） |
 | 负样本误报率 | 0% | ≤ 15% | ≤ 10% | ≤ 10% | **0%**（17 负样本含 9 个 hard/hard2 陷阱） |
@@ -994,7 +995,7 @@ rules:
 | 批次 | 内容 | 批次专项标准 |
 |------|------|-------------|
 | **R1 命题缺口**（最高优先）✅（2026-09-30） | CTX-AST-001 context 泄漏 ✅；SEC-AST-003 SQL 注入 ✅；SEC-AST-004 命令注入 ✅；SEC-AST-002 token 前缀扩充（ghu/s/r、glpat-、AIza、npm_、SG.、Bearer；mask.go 同步 ✅） | 每条 ≥2 正样本 + ≥1 陷阱负样本，标注先于实现 ✅（新增 8 样本：7 正 + 5 陷阱负 + 1 脱敏；门禁 52 样本 100%/100%/0%）|
-| **R2 单行规则批量** | DSL：InsecureSkipVerify、time.Tick、recover 误用；内置：CTX-AST-002 context 替换、CON-AST-001 mutex、RES-AST-002 defer-in-loop + timer/ticker、DB-AST-002 rows.Err | 单行类规则 confidence ≤ 0.75 或走 warnings，防拉高误报率 |
+| **R2 单行规则批量** ✅（2026-09-30） | **偏离**：原计划 3 条走 DSL，但 DSL 仅 --rules-dir 时加载、门禁无法覆盖，全部落内置 ✅。落地 5 规则：SEC-AST-005 InsecureSkipVerify（high/0.85）、CTX-AST-002 ctx 根替换（low/0.70；参数区限定防返回值误判）、CON-AST-001 mutex（RLock 不误匹配）、RES-AST-002 defer-in-loop + time.Tick + NewTimer/Ticker 无 Stop、DB-AST-002 rows.Err ✅。提前项：ERR-AST-001 修 range `_` 误报（`for _, v := range` 被当错误丢弃，属 R3 抑制范围）。db_lifecycle_001 旧正样本扩写期望（DB-AST-002 合法命中，§8.5 注记实践）。新增 13 样本（7 正 + 6 陷阱）；单测 +13；门禁 **64 样本 100%/100%/0%** | 单行类规则 confidence ≤ 0.85（CTX-AST-002 压 0.70），✅ 未拉高误报率（负样本 0 误报）|
 | **R3 误报抑制深化** | RES-AST-001 变量名级匹配 + 同块限定；ERR-AST-001 白名单；SEC-AST-001 placeholder/env 豁免 | 陷阱负样本误报清零，既有正样本检出不回退 |
 | **R4 按需/降级** | 事务内 HTTP 调用、连接池未配置、DB 句柄所有权、日志侧敏感泄漏、裸 `return err`、循环内字符串拼接、correctness 类（nil/边界，归 LLM 复核提示词） | 逐条评估，低置信一律 warnings 通道；数据竞争/跨函数类随 M4 |
 

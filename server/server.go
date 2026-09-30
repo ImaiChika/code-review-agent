@@ -849,6 +849,11 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	engine.Register(rules.NewTokenContextCancelRule())    // R1：CTX-AST-001
 	engine.Register(rules.NewTokenSQLInjectionRule())     // R1：SEC-AST-003
 	engine.Register(rules.NewTokenCommandInjectionRule()) // R1：SEC-AST-004
+	engine.Register(rules.NewTokenInsecureTLSRule())      // R2：SEC-AST-005
+	engine.Register(rules.NewTokenContextRootRule())      // R2：CTX-AST-002
+	engine.Register(rules.NewTokenMutexRule())            // R2：CON-AST-001
+	engine.Register(rules.NewTokenLoopTimerRule())        // R2：RES-AST-002
+	engine.Register(rules.NewTokenRowsErrRule())          // R2：DB-AST-002
 
 	ruleList := make([]ruleMeta, 0, 6)
 	for _, rule := range engine.Rules() {

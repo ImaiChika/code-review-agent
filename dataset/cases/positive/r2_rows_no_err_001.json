@@ -1,0 +1,11 @@
+{
+  "id": "r2_rows_no_err_001",
+  "description": "R2：rows 迭代后未检查 rows.Err()（迭代中途出错被吞）（DB-AST-002）",
+  "category": "lifecycle",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "DB-AST-002", "file": "dao.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

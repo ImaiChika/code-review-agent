@@ -1,0 +1,15 @@
+--- a/scan.go
++++ b/scan.go
+@@ -1,2 +1,11 @@
+ package scan
+ 
++func scan(files []string) {
++	for _, name := range files {
++		f, err := os.Open(name)
++		if err != nil {
++			continue
++		}
++		defer f.Close()
++		use(f)
++	}
++}

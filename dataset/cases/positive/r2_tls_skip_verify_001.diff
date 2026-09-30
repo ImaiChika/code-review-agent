@@ -1,0 +1,9 @@
+--- a/client.go
++++ b/client.go
+@@ -1,2 +1,6 @@
+ package client
+ 
++func dial() (*http.Client, error) {
++	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
++	return &http.Client{Transport: tr}, nil
++}

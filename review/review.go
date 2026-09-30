@@ -271,6 +271,11 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	engine.Register(rules.NewTokenContextCancelRule())    // R1：CTX-AST-001
 	engine.Register(rules.NewTokenSQLInjectionRule())     // R1：SEC-AST-003
 	engine.Register(rules.NewTokenCommandInjectionRule()) // R1：SEC-AST-004
+	engine.Register(rules.NewTokenInsecureTLSRule())      // R2：SEC-AST-005
+	engine.Register(rules.NewTokenContextRootRule())      // R2：CTX-AST-002
+	engine.Register(rules.NewTokenMutexRule())            // R2：CON-AST-001
+	engine.Register(rules.NewTokenLoopTimerRule())        // R2：RES-AST-002
+	engine.Register(rules.NewTokenRowsErrRule())          // R2：DB-AST-002
 
 	// 加载 YAML 自定义规则
 	if opts.RulesDir != "" {

@@ -1,0 +1,9 @@
+{
+  "id": "neg_r2_mutex_unlocked_ok_001",
+  "description": "R2 陷阱：defer mu.Unlock() 规范写法，CON-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

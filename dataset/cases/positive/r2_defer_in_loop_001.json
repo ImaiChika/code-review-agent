@@ -1,0 +1,15 @@
+{
+  "id": "r2_defer_in_loop_001",
+  "description": "R2：for 循环内 defer（函数退出才执行，循环内文件句柄累积不释放）（RES-AST-002）",
+  "category": "resource",
+  "difficulty": "hard",
+  "expected_findings": [
+    {
+      "rule_id": "RES-AST-002",
+      "file": "scan.go",
+      "line": 9
+    }
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}
