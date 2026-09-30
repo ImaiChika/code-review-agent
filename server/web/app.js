@@ -30,9 +30,18 @@ const SEV = {
 };
 const CAT = {
   security: "安全风险", resource: "资源泄漏", error_handling: "错误处理",
-  testing: "测试缺失", lifecycle: "生命周期", sensitive_leak: "敏感信息泄漏",
+  testing: "测试缺失", lifecycle: "数据库事务", sensitive_leak: "敏感信息泄漏",
   concurrency: "并发问题",
 };
+/* 输入类型 / 任务状态：界面一律显示中文，内部枚举值不外露 */
+const INPUT_TYPE_LABEL = {
+  diff_content: "粘贴 DIFF", diff_file: "diff 文件", file_contents: "粘贴代码",
+  upload: "上传文件", pr_url: "GitHub PR", repo_path: "仓库路径",
+};
+const inputTypeLabel = t => INPUT_TYPE_LABEL[t] || t;
+const STATUS_ZH = { queued: "排队中", running: "进行中", completed: "已完成", failed: "失败" };
+const statusZH = s => STATUS_ZH[s] || s;
+const inputPathLabel = p => p === "api-upload" ? "网页提交" : p;
 const GRADE_COLOR = { A: "gA", B: "gB", C: "gC", D: "gD", F: "gF" };
 
 /* ---------- 工具 ---------- */
@@ -197,11 +206,14 @@ async function viewDashboard() {
   const dimRows = (rules.dimensions || []).map(d =>
     hbar(d.name, `${Math.round(d.weight * 100)}%`, 30, "var(--violet)", true)).join("");
 
-  const ruleRows = (fs.top_rules || []).map((r, i) => `
-    <tr><td class="dim mono">TOP${i + 1}</td><td class="mono">${esc(r.rule_id)}</td>
-    <td style="text-align:right">${r.count}</td></tr>`).join("") ||
-    `<tr><td colspan="3" class="empty">暂无命中</td></tr>`;
-
+  const ruleName = {};
+  ((rules && rules.rules) || []).forEach(r => { ruleName[r.id] = r.name; });
+  const ruleTopRows = (stats.finding_stats.top_rules || []).map((r, i) => `
+    <tr class="rowlink" onclick="location.hash='#/rules'">
+      <td class="dim">TOP${i + 1}</td>
+      <td>${esc(ruleName[r.rule_id] || r.rule_id)}<span class="dim mono" style="font-size:10px;margin-left:6px">${esc(r.rule_id)}</span></td>
+      <td style="text-align:right">${r.count}</td>
+    </tr>`).join("");
   const recentRows = (stats.recent_risks || []).map(r => `
     <tr class="rowlink" onclick="location.hash='#/task/${esc(r.task_id)}'">
       <td class="mono dim">${esc(r.task_id)}</td>
@@ -230,7 +242,8 @@ async function viewDashboard() {
         "柱 = 每天审查任务数；橙色点线 = 当天平均风险分。数据来自任务表 SQL 聚合")}
       ${panel("严重度分布", sevRows)}
       ${panel("问题分类", catRows)}
-      ${panel("规则命中排行", `<table class="t"><thead><tr><th>#</th><th>RULE ID</th><th style="text-align:right">命中</th></tr></thead><tbody>${ruleRows}</tbody></table>`)}
+      ${panel("规则命中排行", `<table class="t"><thead><tr><th>#</th><th>规则</th><th style="text-align:right">命中</th></tr></thead><tbody>${ruleTopRows}</tbody></table>`,
+        "规则中文名后的小字是规则 ID；点开任一问题的详情都能看到它来自哪条规则")}
       ${panel("最近任务", `<table class="t"><thead><tr><th>TASK</th><th>输入</th><th style="text-align:right">风险</th><th style="text-align:right">等级</th></tr></thead><tbody>${recentRows}</tbody></table>`)}
       ${panel("评分维度", dimRows, "风险评分由 6 个维度加权求和：安全问题 30% / 敏感信息 15% / 资源泄漏 20% / 错误处理 15% / 测试覆盖 15% / 并发问题 5%")}
       ${panel("业务管线", pipelineHTML(), "一次审查从输入到落库的完整流程，CLI 与 Web 服务共用同一条管线")}
@@ -292,14 +305,14 @@ function trendSVG(daily) {
 
 function pipelineHTML() {
   const steps = [
-    ["STEP-1", "输入解析", "unified diff / git 工作区 / API 上传"],
-    ["STEP-2", "规则装载", "7 条内置规则 + YAML 自定义规则"],
-    ["STEP-3", "规则审查", "go/scanner 词法事实匹配新增行"],
-    ["STEP-3.5", "沙箱执行", "go vet / go test，先过权限策略"],
-    ["STEP-4", "去重降噪", "同键去重，低置信度转警告"],
-    ["STEP-5", "风险评分", "6 维度加权 0-100 分 + A-F 等级"],
-    ["STEP-6", "报告生成", "JSON + Markdown 双格式"],
-    ["STEP-7", "落库审计", "SQLite 6 张表，按任务可查"],
+    ["STEP-1", "读取代码", "粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR / 仓库路径"],
+    ["STEP-2", "准备规则", "7 条内置规则 + 自定义规则（如有）"],
+    ["STEP-3", "逐条检查", "扫描新增代码，按规则找出可疑写法"],
+    ["STEP-3.5", "沙箱验证", "在隔离环境运行 go vet / go test（仓库模式可选）"],
+    ["STEP-4", "合并整理", "重复问题只留一条；没把握的降为警告"],
+    ["STEP-5", "风险打分", "六个维度加权，得出 0-100 分与 A-F 等级"],
+    ["STEP-6", "生成报告", "JSON / Markdown / HTML 三种格式"],
+    ["STEP-7", "记录归档", "全部记录存入数据库，随时可查"],
   ];
   return `<div class="pipe">${steps.map(s => `
     <div class="pipe-step">
@@ -679,7 +692,7 @@ function renderReviewResult(rep) {
       <div class="kv" style="margin-top:14px">
         <span class="k">任务 ID</span><span class="v mono">${esc(rep.task_id)} —
           <a class="link" href="#/task/${esc(rep.task_id)}">查看档案</a></span>
-        <span class="k">扫描</span><span class="v">${rep.files_count} 个文件（Go ${rep.go_files_count}） · ${sevSummary} · 去重移除 ${rep.summary.dedup_removed}</span>
+        <span class="k">扫描</span><span class="v">${rep.files_count} 个文件（Go ${rep.go_files_count}） · ${sevSummary} · 重复剔除 ${rep.summary.dedup_removed}</span>
         <span class="k">耗时</span><span class="v">${esc(m.total_duration)}</span>
         ${llmLine}
         ${sandbox.total_runs ? `<span class="k">沙箱</span><span class="v">${sandbox.successful}/${sandbox.total_runs} 通过 · ${esc(sandbox.total_duration)}</span>` : ""}
@@ -704,11 +717,11 @@ async function viewTasks() {
     <tr class="rowlink" onclick="location.hash='#/task/${esc(t.task_id)}'">
       <td class="mono">${esc(t.task_id)}</td>
       <td class="dim">${fmtTime(t.started_at)}</td>
-      <td><span class="badge info">${esc(t.input_type)}</span></td>
-      <td>${t.task_name ? `<b>${esc(t.task_name)}</b> <span class="dim" style="font-size:11px">${esc(t.input_path)}</span>` : `<span class="dim">${esc(t.input_path)}</span>`}</td>
+      <td><span class="badge info">${esc(inputTypeLabel(t.input_type))}</span></td>
+      <td>${t.task_name ? `<b>${esc(t.task_name)}</b> <span class="dim" style="font-size:11px">${esc(inputPathLabel(t.input_path))}</span>` : `<span class="dim">${esc(inputPathLabel(t.input_path))}</span>`}</td>
       <td style="text-align:right">${t.files_count}</td>
       <td style="text-align:right">${t.go_files_count}</td>
-      <td class="dim">${esc(t.status)}</td>
+      <td class="dim">${esc(statusZH(t.status))}</td>
     </tr>`).join("") || `<tr><td colspan="7" class="empty">还没有任务</td></tr>`;
 
   $view.innerHTML = `
@@ -736,7 +749,7 @@ async function viewTask(taskID) {
     <div class="view-enter">
       <h2 class="view-title">任务档案</h2>
       <div class="kv" style="margin-bottom:16px">
-        <span class="k">任务</span><span class="v mono">${esc(taskID)} · ${esc((d.task && d.task.input_type) || "")}</span>
+        <span class="k">任务</span><span class="v mono">${esc(taskID)} · ${esc(inputTypeLabel((d.task && d.task.input_type) || ""))}</span>
       </div>
       ${st === "failed"
         ? `<div class="notice">✗ 任务失败：${esc((d.task && d.task.error_msg) || "未知原因")}</div>`
@@ -772,19 +785,14 @@ async function viewTask(taskID) {
     <td class="dim">${esc(p.reason)}</td></tr>`).join("") ||
     `<tr><td colspan="3" class="empty">本任务没有需要审批的沙箱命令</td></tr>`;
 
-  const skillLine = rep.skill && rep.skill.loaded
-    ? `<span class="k">Skill</span><span class="v mono">${esc(rep.skill.name)} ${esc(rep.skill.version)}</span>`
-    : "";
-
   $view.innerHTML = `
   <div class="view-enter">
     <h2 class="view-title">任务档案</h2>
     <div class="kv" style="margin-bottom:16px">
       ${rep.task_name ? `<span class="k">名称</span><span class="v" style="font-weight:600">${esc(rep.task_name)}</span>` : ""}
-      <span class="k">任务</span><span class="v mono">${esc(rep.task_id)} · ${esc(rep.input_type)} · ${esc(rep.input_path)} · ${fmtTime(rep.start_time)} → ${esc(rep.duration)} ·
+      <span class="k">任务</span><span class="v mono">${esc(rep.task_id)} · ${esc(inputTypeLabel(rep.input_type))} · ${esc(inputPathLabel(rep.input_path))} · ${fmtTime(rep.start_time)} → ${esc(rep.duration)} ·
         <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report">下载报告</a> ·
         <a class="link" href="/api/tasks/${encodeURIComponent(rep.task_id)}/report?format=html" target="_blank">HTML 报告 ${help("新窗口打开自包含 HTML 报告，可直接另存/转发，离线可读")}</a></span>
-      ${skillLine}
     </div>
 
     ${panel("风险判定", gaugeHTML(m.risk_score, m.risk_grade),
@@ -816,6 +824,7 @@ async function viewTask(taskID) {
         ${panel("安全审批记录", `<table class="t"><thead><tr><th>命令</th><th>决策</th><th>原因</th></tr></thead><tbody>${permRows}</tbody></table>`,
           "沙箱里每条要执行的命令都会先经过安全检查：allow=放行，deny=拒绝；拒绝的命令不会执行，全部留痕可查")}
         ${panel("执行统计", `<div class="kv">
+          <span class="k">审查引擎</span><span class="v">${rep.skill && rep.skill.loaded ? `${esc(rep.skill.name)} ${esc(rep.skill.version)}` : "内置规则引擎"}</span>
           <span class="k">沙箱命令</span><span class="v">${m.tool_call_count} 次</span>
           <span class="k">规则</span><span class="v">${m.rule_count} 条 · ${esc(m.rule_duration)}</span>
           <span class="k">扫描文件</span><span class="v">${m.files_scanned} 个</span>
@@ -823,11 +832,11 @@ async function viewTask(taskID) {
           <span class="k">安全拦截</span><span class="v">${m.permission_denied} 次 · 异常 ${m.exception_count} 次</span>
         </div>`)}
         ${panel("任务元数据", `<div class="kv">
-          <span class="k">状态</span><span class="v">${esc(d.task.status)}</span>
+          <span class="k">状态</span><span class="v">${esc(statusZH(d.task.status))}</span>
           <span class="k">文件</span><span class="v">${d.task.files_count}（Go ${d.task.go_files_count}）</span>
           <span class="k">开始</span><span class="v">${fmtTime(d.task.started_at)}</span>
           <span class="k">结束</span><span class="v">${fmtTime(d.task.completed_at)}</span>
-          <span class="k">结果</span><span class="v">${rep.summary.total_findings} 发现 + ${rep.summary.total_warnings} 警告 · 去重移除 ${rep.summary.dedup_removed}</span>
+          <span class="k">结果</span><span class="v">${rep.summary.total_findings} 发现 + ${rep.summary.total_warnings} 警告 · 重复剔除 ${rep.summary.dedup_removed}</span>
         </div>`)}
       </div>
     </details>
@@ -870,7 +879,7 @@ async function viewRules() {
       <td>${esc(r.name)}</td>
       <td>${badge(r.severity)}</td>
       <td class="dim">${esc(CAT[r.category] || r.category)}</td>
-      <td><span class="badge ${r.source === "builtin" ? "info" : "low"}">${r.source === "builtin" ? "内置" : "YAML"}</span></td>
+      <td><span class="badge ${r.source === "builtin" ? "info" : "low"}">${r.source === "builtin" ? "系统自带" : "自定义"}</span></td>
     </tr>`).join("");
 
   const dimRows = (data.dimensions || []).map(d => hbar(d.name, `${Math.round(d.weight * 100)}%`, 30, "var(--violet)", true)).join("");
@@ -880,8 +889,8 @@ async function viewRules() {
     <h2 class="view-title">规则引擎</h2>
 
     <div class="grid grid-2">
-      ${panel(`已注册规则（${data.rules.length}）`, `<table class="t">
-        <thead><tr><th>RULE ID</th><th>名称</th><th>级别</th><th>分类</th><th>来源 ${help("内置 = Go 代码实现；YAML = 用户通过 --rules-dir 加载的自定义规则")}</th></tr></thead>
+      ${panel(`已加载规则（${data.rules.length}）`, `<table class="t">
+        <thead><tr><th>RULE ID</th><th>名称</th><th>级别</th><th>分类</th><th>来源 ${help("系统自带 = 出厂内置的检查规则；自定义 = 通过自定义规则文件（YAML）加载的规则")}</th></tr></thead>
         <tbody>${ruleRows}</tbody></table>`)}
       <div>
         <div style="margin-bottom:14px">
@@ -973,7 +982,7 @@ function renderSettingsPage() {
   const cards = st.profiles.map(p => `
     <div class="profile-card${p.id === selectedProfileID ? " sel" : ""}${p.is_current ? " current" : ""}"
          onclick="selectProfile('${esc(p.id)}')">
-      <div class="pc-name">${esc(p.name)}${p.is_current ? ' <span class="badge info">当前</span>' : ""}${p.built_in ? ' <span class="badge low">出厂</span>' : ""}</div>
+      <div class="pc-name">${esc(p.name)}${p.is_current ? ' <span class="badge info">当前</span>' : ""}</div>
       <div class="pc-sub">${esc(p.model || "未设模型")} · ${p.key_set ? `✓ 已配 Key（尾号 ${esc(p.key_hint.slice(-4))}）` : "未配 Key"}</div>
     </div>`).join("");
 
@@ -986,7 +995,7 @@ function renderSettingsPage() {
           <div class="profile-list">${cards || '<div class="empty">还没有方案</div>'}</div>
           <div style="display:flex;gap:10px;margin-top:12px">
             <button class="btn" id="btn-add-profile" onclick="startAddProfile()">＋ 添加新方案</button>
-            <button class="btn btn-ghost" onclick="resetProfiles()">↺ 重置为出厂方案</button>
+            <button class="btn btn-ghost" onclick="resetProfiles()">↺ 恢复预置方案</button>
           </div>`, "方案 = 一套「名称 + 服务商 + 端点 + 模型 + 密钥」。切换当前方案后，审查即用该方案；选择会记住，重新登录也优先展示它")}
         <div style="height:14px"></div>
         ${panel("E2B 云沙箱", `
@@ -1002,7 +1011,7 @@ function renderSettingsPage() {
             <span class="k">LLM 复核</span><span class="v">${st.llm.ready ? `<b style="color:var(--green)">✓ 就绪</b>（${esc(st.llm.model || "")} · 方案「${esc(currentProfileName())}」）` : "未就绪 — 请选择方案并配好 Key"}</span>
             <span class="k">E2B 云沙箱</span><span class="v">${st.e2b.key_set ? `<b style="color:var(--green)">✓ 已配置</b>` : "未配置"}</span>
             <span class="k">服务默认沙箱</span><span class="v mono">${esc(st.sandbox_default)}</span>
-            <span class="k">写操作认证</span><span class="v">${st.auth_enabled ? "已启用（修改设置需 token）" : "未启用（本地模式）"}</span>
+            <span class="k">认证保护</span><span class="v">${st.auth_enabled ? "已启用（修改设置需凭证）" : "未启用（本地模式）"}</span>
           </div>`)}
       </div>
       <div>
@@ -1200,15 +1209,15 @@ async function deleteProfile(id) {
 }
 
 async function resetProfiles() {
-  const ok = await confirmModal("重置为出厂方案",
-    "将恢复为 6 个出厂方案（DeepSeek / 通义千问 / 智谱 GLM / Kimi / OpenAI / MiMo）：自定义方案会被删除，同服务商已填的密钥会保留，其余修改（改名/换模型）不保留。确定继续？", "重置");
+  const ok = await confirmModal("恢复预置方案",
+    "将恢复为 6 个预置方案（DeepSeek / 通义千问 / 智谱 GLM / Kimi / OpenAI / MiMo）：自定义方案会被删除，同服务商已填的密钥会保留，其余修改（改名/换模型）不保留。确定继续？", "重置");
   if (!ok) return;
   try {
     settingsCache = await api("/api/settings/profiles/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     selectedProfileID = settingsCache.current_id || (settingsCache.profiles[0] && settingsCache.profiles[0].id) || null;
     profileCreateMode = false;
     renderSettingsPage();
-    log("已重置为出厂方案");
+    log("已恢复预置方案");
   } catch (e) {
     alertModal("重置失败", e.message);
   }

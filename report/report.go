@@ -52,6 +52,31 @@ type ReviewReport struct {
 	Monitor MonitorInfo `json:"monitor"`
 }
 
+// InputTypeLabel 输入类型的用户可读名称（界面/报告展示用；枚举值本身是内部标识）。
+func InputTypeLabel(t string) string {
+	switch t {
+	case "diff_content":
+		return "粘贴的 diff"
+	case "diff_file":
+		return "diff 文件"
+	case "file_contents", "upload":
+		return "粘贴/上传的文件"
+	case "pr_url":
+		return "GitHub PR"
+	case "repo_path":
+		return "仓库路径"
+	}
+	return t
+}
+
+// DisplayInputPath 输入路径的展示名（api-upload 是内部占位，对用户无意义）。
+func DisplayInputPath(p string) string {
+	if p == "api-upload" {
+		return "网页提交"
+	}
+	return p
+}
+
 // SkillInfo 记录 CR Skill 的加载元数据（M1-B1）。
 type SkillInfo struct {
 	Name        string `json:"name"`            // skill 名，如 "code-review"

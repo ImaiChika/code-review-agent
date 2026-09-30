@@ -101,7 +101,7 @@ func htmlHead(rep *ReviewReport) string {
   <div style="flex:1">
     <h1>代码审查报告</h1>
     <div class="meta mono">任务 ` + html.EscapeString(rep.TaskID) + ` · ` +
-		html.EscapeString(rep.InputType) + ` · ` + html.EscapeString(rep.InputPath) + `<br>
+		html.EscapeString(InputTypeLabel(rep.InputType)) + ` · ` + html.EscapeString(DisplayInputPath(rep.InputPath)) + `<br>
     ` + html.EscapeString(rep.StartTime) + ` → 耗时 ` + html.EscapeString(rep.Duration) +
 		` · 扫描 ` + fmt.Sprintf("%d", rep.FilesCount) + ` 个文件（Go ` + fmt.Sprintf("%d", rep.GoFilesCount) + `）</div>
     <div class="chips">` + severityChips(rep.Summary.BySeverity) + `</div>
@@ -150,7 +150,7 @@ func htmlSummary(rep *ReviewReport) string {
 			html.EscapeString(rep.Monitor.LLMMode), rep.Monitor.LLMDropped))
 	}
 	if rep.Skill != nil && rep.Skill.Loaded {
-		b.WriteString(fmt.Sprintf(`<span class="stat mono">skill <b>%s %s</b></span>`,
+		b.WriteString(fmt.Sprintf(`<span class="stat mono">审查引擎 <b>%s %s</b></span>`,
 			html.EscapeString(rep.Skill.Name), html.EscapeString(rep.Skill.Version)))
 	}
 	b.WriteString(`</div></div>`)

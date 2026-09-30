@@ -23,7 +23,7 @@ func generateMarkdown(r *ReviewReport) string {
 	// 基本信息
 	b.WriteString("## 基本信息\n\n")
 	b.WriteString(fmt.Sprintf("- **任务 ID**: `%s`\n", r.TaskID))
-	b.WriteString(fmt.Sprintf("- **输入类型**: %s\n", r.InputType))
+	b.WriteString(fmt.Sprintf("- **输入类型**: %s\n", InputTypeLabel(r.InputType)))
 	b.WriteString(fmt.Sprintf("- **输入路径**: `%s`\n", r.InputPath))
 	b.WriteString(fmt.Sprintf("- **开始时间**: %s\n", r.StartTime))
 	b.WriteString(fmt.Sprintf("- **结束时间**: %s\n", r.EndTime))
