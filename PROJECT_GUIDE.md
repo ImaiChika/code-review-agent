@@ -18,7 +18,8 @@
 5. [完成度全量检查（对照官方要求）](#五完成度全量检查对照官方要求)
 6. [已知问题与技术债](#六已知问题与技术债)
 7. [成熟度目标与演进路线图](#七成熟度目标与演进路线图)
-8. [附录](#八附录)
+8. [规则广度与深度优化（同题竞品调研与实施计划）](#八规则广度与深度优化同题竞品调研与实施计划)
+9. [附录](#九附录)
 
 ---
 
@@ -421,7 +422,7 @@ rules:
 
 | # | 能力 | 状态 | 证据 / 差距 |
 |---|------|------|------------|
-| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**（`skill.NewFSRepository` → 报告 `skill` 字段含 name/version/loaded）；规则 ≥4 类要求达成（实际覆盖 6 类） |
+| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**（`skill.NewFSRepository` → 报告 `skill` 字段含 name/version/loaded）；规则 ≥4 类要求达成（实际 7 类全覆盖；专项缺口与竞品差距见 §八） |
 | 2 | 沙箱执行（container/e2b，local 仅 fallback） | ✅ | container 手写版 ✅；container-fx（框架 Docker SDK）✅ **CI 实机验证**（网络隔离/只读/非 root/env 白名单）；e2b 云沙箱 ✅ **实机验证**（创建/staging/执行/脱敏/审计；Go 模板需 E2B_TEMPLATE）；均带回退链 |
 | 3 | 工具链接入（高风险命令先过 PermissionPolicy） | ✅ | **M1-B2 起走框架权限体系**：`SafetyFilter.AsPermissionPolicy()` → `tool.PermissionPolicy`，每条沙箱命令经 `policy.CheckToolPermission`，deny/ask 不进沙箱，决策落 `cr_permission_decisions`；命令面仍为 2 条固定命令 |
 | 4 | 输入解析（unified diff / 文件列表 / git 工作区） | ✅ | diff 文件 ✅、git 工作区 ✅、**文件路径列表 ✅（M2-D5 `--files`/`ReadFromFilePaths`，整体按新增行审查）** |
@@ -916,9 +917,108 @@ rules:
 
 ---
 
-## 八、附录
+## 八、规则广度与深度优化（同题竞品调研与实施计划）
 
-### 8.1 trpc-agent-go 框架能力速查（本项目相关部分）
+> 本章是规则引擎唯一的演进计划，依据两份材料：官方命题（trpc-group/trpc-agent-go Issue #2004，即 trpc.txt 项目 1）对规则的要求，以及当初提交到同一 Issue 的 6 个同题 PR 的规则实现逐文件调研（2026-09-30 完成，全部读到检测逻辑层）。**结论先行：命题 7 类规则我们在"类别"层面已全覆盖，但存在 1 个命题点名的实质缺口（context 泄漏）、3 条多数竞品都做而我们没有的规则（SQL 注入、命令注入、rows 生命周期），且同一规则上竞品普遍有更准的误报抑制手法。** 落地沿用 M2 已验证的"标注先行 + 正负样本 + 数据集门禁"纪律，任务编号 R 系列（R1–R4 四批，§8.4）。
+
+> ⚖️ **与既有路线图的权衡结论（2026-09-30）**：**R1 → R2 → R3①② 列为 M8 后续主线，先于 D3/D7/W1/W2 执行**。理由：R1 补的是命题点名的实质缺口（context 泄漏在官方"并发 / context / error handling / resource lifecycle"点名方向上，也是原 GUIDE 七类里"goroutine / context 泄漏"我们唯一没覆盖的一半），竞赛得分权重最高；R2 单批成本低、直接把数据集推向 M8 退出门槛的 ≥50 样本；R3①② 是竞品普遍具备的误报抑制，性价比高。**D3（go/types）顺延为 R3 完整形态（数据流证明）的前置基建**——章节 §8.6 的"明确不做"与此一致；D7 增量审查、W1 多语言兜底与 R 系列无依赖冲突，排 R 系列之后。R4 保持按需降级通道不变。
+
+### 8.1 原命题对规则的要求与调研对象
+
+官方命题对规则的全部要求（Issue #2004 原文）：
+
+| 条目 | 原文要求 | 本项目现状 |
+|------|---------|-----------|
+| 规则类别 | 至少覆盖 7 类中的 4 类：安全风险 / goroutine·context 泄漏 / 资源关闭 / 错误处理 / 测试缺失 / 敏感信息泄漏 / DB 事务·连接生命周期 | 7 类全覆盖（超出底线） |
+| 方向点名 | "Go 版实现应围绕 Go 项目代码评审场景设计……Go 并发 / context / error handling / resource lifecycle 规则" | **context 泄漏无专门规则**（GOR-AST-001 只看 `go` 语句），其余方向齐 |
+| findings 字段 | severity/category/file/line/title/evidence/recommendation/confidence/source/rule_id 共 10 个 | ✅ 全齐 |
+| 验收红线 | 高危检出率 ≥ 80%、误报率 ≤ 15%、脱敏 ≥ 95% | 数据集门禁把守中（§七 7.1） |
+
+6 个同题 PR 一览（规则数以读到的确定性规则定义为准；本项目对应 PR #2374，无规则层面的评审反馈，关闭原因为提交阶段结束）：
+
+| PR | 作者 / 状态 | 规则数 | 手法定位 |
+|----|------------|-------|---------|
+| #2240 | Skylm808 / open | 16 | 行级匹配 + go/scanner 词法作用域分析（块栈、cleanup 切片、inLoop 标记），规则契约表 + fixtures/holdout 双层测试集 |
+| #2318 | Spock12138 / closed | 13 | go/types 类型检查 + 全函数数据流 cleanup 证明引擎（六家中工程最重） |
+| #2348 | Stelquis / closed | 10 | 全文件行级固定窗口扫描 + 规则开关 / severity 覆盖配置 |
+| #2369 | Caelum-C / closed | 10 + 4 | 正则 + 置信度三通道，沙箱工具输出解析为独立诊断规则 |
+| #2375 | furutachiKurea / closed | 22 | 规则目录写给 LLM 推理执行（候选信号 → 必需证据 → 豁免清单三段式），确定性部分只有脱敏与 go test/vet |
+| #2427 | MeiSiristhebest / closed | 6 | 行级正则，规则集是本项目的弱化子集（Begin 不查 Rollback、http.Get 无条件报），无借鉴价值 |
+
+### 8.2 广度差距：竞品有、我们没有的规则
+
+**第一梯队**（≥2 家竞品实现，或命题点名）——构成 R1/R2 主体：
+
+| 规则 | 竞品出处 | 检测思路（取各家最优） | 建议落点 |
+|------|---------|----------------------|---------|
+| context 泄漏：`WithCancel/WithTimeout/WithDeadline` 返回的 cancel 未调用 | #2240、#2348、#2375 | 正则提取 cancel 变量名 → 同词法块/同函数内查 `cancel()` 调用；#2240 的"变量名级匹配 + 同块限定"误报控制最好；#2348 的 `WithCancelCause` 变体顺带收编 | 内置 `CTX-AST-001`（跨行 + token facts，不适合 DSL） |
+| SQL 注入：SQL 关键字与 `+` / `fmt.Sprintf` 拼接同现 | #2240、#2348、#2369、#2375 | #2240 泛化最好：SQL 关键字 + 拼接手法双条件，不写死变量名；#2348 的"拼接对象是用户输入变量"可作升危线索而非必要条件（写死 `request./params[` 泛化差） | 内置 `SEC-AST-003` |
+| 命令注入：`exec.Command("sh","-c", 非字面量)` | #2240、#2348、#2375、#2318 | #2318 最准：AST 判定 payload 实参是否字面量，词法兜底；#2240 额外检查可执行文件参数位置是否为字面量；#2348 补 `syscall.Exec` | 内置 `SEC-AST-004` |
+| rows 生命周期：`rows.Close()` 缺失 + 迭代后缺 `rows.Err()` | #2348、#2369、#2375、#2318 | RES-AST-001 虽列了 `.Query(`，但无独立 ID、无 rows.Err() 建议；#2318 将 rows 单列并给 `rows.Err()` 修复建议（Go 惯例：迭代中途出错必须靠它捕获） | 内置 `DB-AST-002`；RES-AST-001 建议文案补 rows.Err() |
+
+**第二梯队**（单人实现、实现成本低）——R2 主体，个别归 R4：
+
+| 规则 | 出处 | 说明 | 落点 |
+|------|------|------|------|
+| `InsecureSkipVerify: true` | #2318 | 单行正则，TLS 校验被关 | DSL 追加 |
+| mutex `.Lock()` 无 `.Unlock()` | #2240 | 提取 receiver 查同块 `Unlock()`，排除 RLock | 内置 `CON-AST-001` |
+| `defer` 在 for 循环内 | #2240 | 词法块栈判定 inLoop（能处理 `for i := …`/`for range`），比正则准 | 内置 `RES-AST-002` |
+| `time.Tick()`（无法 Stop 的 ticker） | #2369 | 单行匹配，建议 NewTicker + defer Stop | DSL |
+| `context.Background()/TODO()` 出现在签名带 ctx 的函数内 | #2240、#2369 | 取消传播断裂；前置条件"函数段含 context.Context 参数"防 main/init 误报 | 内置 `CTX-AST-002` |
+| `recover()` 不在 defer 行 | #2348 | 单行判断，panic/recover 维度我们完全空缺 | DSL 或 `ERR-AST-002` |
+| timer/ticker/订阅未停止 | #2375 | NewTimer/NewTicker 无对应 Stop，后台资源累积 | 并入 RES-AST-002 |
+
+**密钥 token 覆盖面差距**（SEC-AST-002 `detectLeakPattern` 扩充）：GitHub 五前缀 `gh[pousr]_`（我们只认 `ghp_`，#2318）、GitLab `glpat-`、Google `AIza`、Slack 全系、SendGrid `SG.`、`npm_`（#2369/#2375）、Bearer 头。
+
+> 📌 **2026-09-30 对照代码核实注记**：① `AKIA[0-9A-Z]{16}` 长度校验**检测/脱敏两侧均已存在**（`rules/token_rules.go` AKIA+后16位大写字母数字校验、`safety/mask.go` 同款正则），从差距清单移除；② 本项不是"纯扩表"——检测表扩充必须**同步 `safety/mask.go` 脱敏表**，否则新前缀检出后 evidence 里的明文会击穿脱敏硬门禁（两处同一提交内完成）；③ 每加一条规则/前缀都要跑**全量数据集回归**而非只看新样本（见 §8.5 第 5 步注记）。
+
+### 8.3 深度差距：同一规则上竞品更准的手法
+
+广度之外，竞品在**我们已有的规则**上普遍更准，核心是误报抑制：
+
+| 我们的规则 | 竞品手法 | 出处 | 吸收方式 |
+|-----------|---------|------|---------|
+| RES-AST-001（文件行文本里找 Close） | ① 变量名级匹配：`x, err := os.Open(…)` 提取 `x` 精确查 `x.Close()`，而非"文件任意行有 Close 就放过"；② 同词法块限定：cleanup 只看当前行之后、同一块内，hunk 不完整 fail-closed；③ 数据流证明：defer 语义、return/panic/break 出口失效、if/for 分支合流、错误守卫跳过、resp.Body 别名、重赋值失效 | ①② #2240；③ #2318 | R3 先落 ①②（成本可控）；③ 工程量 1500 行级，归 M4 类型增强后再评估 |
+| GOR-AST-001 | 类型级判定：go/types 判定 context 可取消性 + 别名不动点传播；"time.After + select 不算取消保护" | #2318 / #2348 | time.After 细节直接加进排除逻辑；类型级传播随 M4 |
+| ERR-AST-001 | 错误返回调用白名单（Close/Commit/Rollback/os.Remove/json.Unmarshal/io.Copy 等已知安全忽略面）才报 `_ =`，为压误报设计；另有 `if err != nil` 后空处理块检测 | #2318 / #2348 | 白名单替换现有 safeIgnores 硬编码清单 |
+| SEC-AST-001 | placeholder 值白名单（your-/example/changeme/xxx…）；`os.Getenv()` / `secretmanager` 行豁免（值来自环境则非硬编码） | #2240 / #2369 | 并入 `isLikelyNotSecret` 与新增行级豁免 |
+| DB-AST-001 | 我们的"Commit 或 Rollback 任一即配对"语义正确（#2369 要求两者兼备反而误报 `defer tx.Rollback()` + 条件 Commit 惯用法）；竞品增量：sqlx 的 `Beginx/Connect` 变体、`sql.Open` 无 Close 独立规则 | #2348 / #2318 | 扩 Begin/BeginTx 关键字表即可 |
+| TST-AST-001 | 覆盖导出方法 `func (r *T) Method`；触发条件从"新增导出函数"扩到"导出行为变更"（含函数体修改） | #2348 / #2318 | `extractExportedFuncName` 支持接收者形态 |
+| 通用结构 | 三段式规则定义：候选信号 → 必需证据 → 显式豁免清单（豁免即"可见满足就不许报"）；每条规则 1 正例 + 1 反例 fixture 的变更纪律 | #2375 / #2240 | 结构写进 §8.5 流程，豁免写进规则文档注释 |
+
+### 8.4 实施批次（R 系列）
+
+按"先补命题缺口、再批量低成本规则、最后深化误报抑制"排序。每批独立成串提交，退出标准统一为：`go test ./... -race` 全绿 + 数据集门禁四指标（recall / precision / 负样本误报率 / 脱敏）不回退 + 每条新规则有正负样本覆盖。
+
+| 批次 | 内容 | 批次专项标准 |
+|------|------|-------------|
+| **R1 命题缺口**（最高优先） | CTX-AST-001 context 泄漏；SEC-AST-003 SQL 注入；SEC-AST-004 命令注入；SEC-AST-002 token 前缀扩充（ghpousr_/glpat-/AIza/Bearer；同步 mask.go 脱敏表） | 每条 ≥2 正样本 + ≥1 陷阱负样本，标注先于实现 |
+| **R2 单行规则批量** | DSL：InsecureSkipVerify、time.Tick、recover 误用；内置：CTX-AST-002 context 替换、CON-AST-001 mutex、RES-AST-002 defer-in-loop + timer/ticker、DB-AST-002 rows.Err | 单行类规则 confidence ≤ 0.75 或走 warnings，防拉高误报率 |
+| **R3 误报抑制深化** | RES-AST-001 变量名级匹配 + 同块限定；ERR-AST-001 白名单；SEC-AST-001 placeholder/env 豁免 | 陷阱负样本误报清零，既有正样本检出不回退 |
+| **R4 按需/降级** | 事务内 HTTP 调用、连接池未配置、DB 句柄所有权、日志侧敏感泄漏、裸 `return err`、循环内字符串拼接、correctness 类（nil/边界，归 LLM 复核提示词） | 逐条评估，低置信一律 warnings 通道；数据竞争/跨函数类随 M4 |
+
+### 8.5 新规则落地流程（六步）
+
+1. **标注先行（铁律）**：实现前先手写 ground truth——正样本进 `dataset/positive/`、陷阱负样本进 `dataset/negative/`，schema 沿用 `dataset/README.md`。竞品调研提供陷阱灵感（#2240 的 holdout 对抗集、#2318 的 fail-closed 案例），但标注必须独立手写，防过拟合。
+2. **形态决策**：单行模式且无 token 语义 → YAML DSL（`rules/custom/*.yaml`，免代码免注册）；需要跨行、作用域、token facts 或多文件 → 内置 Go 规则。判断标准一句话：DSL 写不出就升级内置，不在 DSL 里堆绕过逻辑。
+3. **实现 + 注册**：内置规则共四处注册点——`rules/` 实现文件、`review/review.go` 引擎注册段、`server/server.go` 引擎注册段、`integration_test.go`；DSL 只需落 YAML 文件。
+4. **单测三件套**：正例命中、陷阱反例放行、evidence_chain 填充（`BuildEvidenceChain` 四步链，不携带代码明文值）。
+5. **门禁**：`dataset_eval_test.go` 全指标不回退 + 脱敏硬门禁；规则计数类断言（README 规则表、引擎 Summary）同步更新。
+   > ⚠️ **匹配语义注记（2026-09-30 核实）**：`matchExpectations` 按 rule_id+file+line 精确匹配，**产出中任何未被期望注记覆盖的 finding 都计为误报**。因此新规则/新前缀可能命中既有 39 个样本（旧注记没有它的期望项）→ 直接拉低精确率。每条新规则落地后必须跑全量数据集（不只新样本）：新规则在旧正样本上的合法命中应**扩写该样本的期望注记**（标注先行纪律同样适用），在旧负样本上的命中即为真误报、必须加排除条件。
+6. **文档同步（同一提交内）**：`skills/code-review/RULES.md`、README 规则表、本指南 §五 5.1 与 §8.2/§8.4 状态列；提交 message 引用 R 编号（§7.8 提交纪律）。
+
+### 8.6 红线与不做的
+
+- **误报率 ≤ 15% 是官方验收红线**：R2 的单行正则类是最大误报源，必须带排除条件（localhost/test/nolint）或压低置信度走 warnings，先于检出率考虑。
+- **没有正样本支撑的规则不进内置引擎**：防"规则虚荣"——存在但从未命中、也无法验证命中的规则只会稀释审查信号。
+- **DSL 与内置的边界不破**：DSL 不写跨行逻辑；确需作用域判断的，升级为内置规则而不是在 DSL 里堆特例。
+- **明确不做**：#2318 的全函数数据流证明引擎（收益大但 1500 行级工程量，等 M4 类型增强基建就位再评估）；#2375 的 22 条 LLM 目录规则不整体照搬（执行不可复现、无确定性门禁），只吸收 correctness 类语义进 LLM 复核提示词与 R4 降级项。
+
+---
+
+## 九、附录
+
+### 9.1 trpc-agent-go 框架能力速查（本项目相关部分）
 
 | 模块 | 关键 API | 外部依赖 |
 |------|---------|---------|
@@ -943,7 +1043,7 @@ rules:
 - `codeexecutor` 的 `Capabilities.SupportsCleanEnv` 是安全契约：依赖 CleanEnv 做 env 隔离的工具会 fail-closed。
 - container/e2b/local 三个后端都实现了完整 workspace 语义（PutFiles/StageInputs/CollectOutputs），本项目目前只用了 RunProgram 这一个方法。
 
-### 8.2 框架源码本地位置
+### 9.2 框架源码本地位置
 
 ```
 /Users/imaichika/Documents/trpc-agent/trpc-agent-go    # v1.10.0 源码（与本项目并排）
@@ -954,7 +1054,7 @@ rules:
 
 写扩展代码前先翻 `examples/` 对应目录，基本都有可抄的最小示例。
 
-### 8.3 测试 fixture 清单
+### 9.3 测试 fixture 清单
 
 | fixture | 验证 | 期望 |
 |---------|------|------|
