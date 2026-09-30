@@ -1,0 +1,9 @@
+--- a/worker.go
++++ b/worker.go
+@@ -1,2 +1,6 @@
+ package worker
+ 
++func batch() error {
++	dctx, cancel := context.WithDeadline(context.Background(), deadline)
++	return useCtx(dctx)
++}

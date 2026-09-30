@@ -60,6 +60,31 @@
 - **排除**: `main` 函数、接口方法实现
 - **置信度**: 0.75
 
+### DB-AST-001: Token 感知的 DB 事务生命周期检测
+
+- **严重度/分类**: medium / lifecycle
+- **检测**: 新增行出现 `Begin(` / `BeginTx(`，且全部新增行无 `Commit(` / `Rollback(` 配对
+- **豁免**: 任一新增行含 Commit 或 Rollback（含 defer 形态）即视为已处理
+
+### CTX-AST-001: Token 感知的 context 取消泄漏检测（R1）
+
+- **严重度/分类**: medium（命名变体）/ high（丢弃变体）/ lifecycle
+- **检测**: 新增行出现 `context.WithCancel / WithTimeout / WithDeadline / WithCancelCause`，提取第二个返回值（cancel），在全部新增行中找不到 `cancel(` 调用
+- **豁免**: `defer cancel()` / 任意位置 `cancel()` 调用；丢弃变体（cancel 赋给 `_`）确定性泄漏报 high
+- **边界**: cancel 在未变更代码中调用时 hunk 不可见，命名变体置信度压 0.75，误报请标记
+
+### SEC-AST-003: Token 感知的 SQL 拼接注入检测（R1）
+
+- **严重度/分类**: high / security
+- **检测**: 字符串字面量含 SQL 语句形态（SELECT..FROM / INSERT INTO / UPDATE..SET / DELETE FROM / DROP / TRUNCATE）且同行走拼接（`"..." + 标识符` / `标识符 + "..."`）或 `fmt.Sprintf`
+- **豁免**: 参数化占位符（`?` / `$N`）在 SQL 字面量内；纯常量片段拼接（拼接侧字面量无 SQL 语句形态）
+
+### SEC-AST-004: Token 感知的命令注入检测（R1）
+
+- **严重度/分类**: high / security
+- **检测**: `exec.Command / exec.CommandContext` 的可执行文件参数是变量；或可执行文件为 shell 字面量（sh/bash/zsh/ksh/cmd/powershell）但后续参数（如 `-c` 脚本）来自变量；`syscall.Exec` 任一参数动态
+- **豁免**: 全字面量调用（`exec.Command("ls", "-la")`、`sh -c "echo hi"`）
+
 ## YAML 自定义规则
 
 ### 规则文件格式

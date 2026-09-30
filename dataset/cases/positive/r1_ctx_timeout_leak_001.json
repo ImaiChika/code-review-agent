@@ -1,0 +1,11 @@
+{
+  "id": "r1_ctx_timeout_leak_001",
+  "description": "R1：context.WithTimeout 返回的 cancel 在本次变更内从未调用（命题点名缺口 CTX-AST-001）",
+  "category": "lifecycle",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "CTX-AST-001", "file": "fetch.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

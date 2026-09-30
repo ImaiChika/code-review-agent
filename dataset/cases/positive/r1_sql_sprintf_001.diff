@@ -1,0 +1,9 @@
+--- a/repo.go
++++ b/repo.go
+@@ -1,2 +1,6 @@
+ package repo
+ 
++func rename(id int, name string) error {
++	q := fmt.Sprintf("UPDATE users SET name = '%s' WHERE id = %d", name, id)
++	return execSQL(q)
++}

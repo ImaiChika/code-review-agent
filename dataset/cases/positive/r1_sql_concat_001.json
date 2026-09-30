@@ -1,0 +1,11 @@
+{
+  "id": "r1_sql_concat_001",
+  "description": "R1：SQL 字符串与变量 + 拼接（SQL 注入，SEC-AST-003）",
+  "category": "security",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-003", "file": "repo.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,9 @@
+--- a/repo.go
++++ b/repo.go
+@@ -1,2 +1,6 @@
+ package repo
+ 
++func find(id int) (*userRow, error) {
++	row := db.QueryRow("SELECT * FROM users WHERE id = ?", id)
++	return scan(row)
++}

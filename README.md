@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **Token 感知的规则引擎**：基于 `go/scanner` 词法分析，不是简单正则匹配
-- **6 条内置规则**：硬编码密钥、敏感信息泄漏、goroutine 泄漏、资源泄漏、错误处理、测试缺失
+- **10 条内置规则**：硬编码密钥、敏感信息泄漏（含 GitHub/GitLab/Google/npm/SendGrid/Bearer 前缀）、goroutine 泄漏、context 取消泄漏、资源泄漏、SQL 拼接注入、命令注入、错误处理、测试缺失、DB 事务生命周期
 - **YAML 规则 DSL**：用户可用 YAML 自定义规则，不需要写 Go 代码
 - **风险评分系统**：0-100 分量化评分，带多维度 breakdown
 - **SQLite 存储**：审查结果持久化，支持按任务查询
@@ -114,7 +114,9 @@ code-review-agent/
 ├── rules/               # 规则引擎
 │   ├── rule.go          # Rule 接口
 │   ├── engine.go        # 规则引擎
-│   ├── token_rules.go   # 6 条 Token 感知规则
+│   ├── token_rules.go   # Token 感知规则（SEC/GOR/RES/ERR/TST/DB）
+│   ├── context_leak.go  # CTX-AST-001（R1）
+│   ├── sql_injection.go / command_injection.go  # SEC-AST-003/004（R1）
 │   ├── dsl.go           # YAML 规则 DSL 加载器
 │   └── custom/          # 自定义 YAML 规则示例
 ├── safety/              # 安全过滤器 + 脱敏
@@ -141,6 +143,9 @@ code-review-agent/
 | ERR-AST-001 | Token 感知的错误处理 | 忽略 error、panic、log.Fatal |
 | TST-AST-001 | Token 感知的测试缺失 | 新增导出函数无测试 |
 | DB-AST-001 | DB 事务生命周期（M2-D4） | Begin/BeginTx 后无 Commit/Rollback 配对 |
+| CTX-AST-001 | context 取消泄漏（R1） | WithCancel/WithTimeout/WithDeadline 的 cancel 未调用 |
+| SEC-AST-003 | SQL 拼接注入（R1） | SQL 语句与变量 + 拼接 / fmt.Sprintf 格式化，参数化（?/$1）豁免 |
+| SEC-AST-004 | 命令注入（R1） | exec.Command(Context) 可执行文件或 shell -c 参数来自变量 |
 
 ## YAML 自定义规则
 

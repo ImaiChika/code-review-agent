@@ -19,8 +19,18 @@ import (
 var (
 	// AWS Access Key
 	awsKeyPattern = regexp.MustCompile(`AKIA[0-9A-Z]{16}`)
-	// GitHub Token
-	ghTokenPattern = regexp.MustCompile(`gh[pous]_[a-zA-Z0-9]{36,}`)
+	// GitHub Token（p/o/u/s/r 全前缀，R1 补 r）
+	ghTokenPattern = regexp.MustCompile(`gh[pousr]_[a-zA-Z0-9]{30,}`)
+	// GitLab PAT（R1）
+	gitlabPATPattern = regexp.MustCompile(`glpat-[A-Za-z0-9_-]{20,}`)
+	// Google API Key（R1）
+	googleAPIPattern = regexp.MustCompile(`AIza[0-9A-Za-z_-]{30,}`)
+	// npm 访问令牌（R1）
+	npmTokenPattern = regexp.MustCompile(`npm_[A-Za-z0-9]{30,}`)
+	// SendGrid API Key（R1）
+	sendGridPattern = regexp.MustCompile(`SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}`)
+	// Bearer 长凭据（R1；占位符形态交由检测侧豁免，脱敏侧宽匹配无害）
+	bearerPattern = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._-]{25,}`)
 	// Stripe Key
 	stripeKeyPattern = regexp.MustCompile(`(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{20,}`)
 	// Slack Token
@@ -67,6 +77,12 @@ func maskLine(line string) string {
 	line = awsKeyPattern.ReplaceAllString(line, "AKIA***REDACTED***")
 	// 2. GitHub Token
 	line = ghTokenPattern.ReplaceAllString(line, "***REDACTED***")
+	// 2.1 R1：GitLab / Google / npm / SendGrid / Bearer
+	line = gitlabPATPattern.ReplaceAllString(line, "glpat-***REDACTED***")
+	line = googleAPIPattern.ReplaceAllString(line, "AIza***REDACTED***")
+	line = npmTokenPattern.ReplaceAllString(line, "npm_***REDACTED***")
+	line = sendGridPattern.ReplaceAllString(line, "SG.***REDACTED***")
+	line = bearerPattern.ReplaceAllString(line, "Bearer ***REDACTED***")
 	// 3. Stripe Key（保留前缀）
 	line = stripeKeyPattern.ReplaceAllStringFunc(line, func(s string) string {
 		idx := strings.Index(s[3:], "_")
@@ -124,3 +140,6 @@ func maskLine(line string) string {
 func MaskFindingsEvidence(evidence string) string {
 	return MaskSensitiveInfo(evidence)
 }
+
+// MaskForTest 暴露 maskLine 给跨包单测（仅测试使用）。
+func MaskForTest(line string) string { return maskLine(line) }

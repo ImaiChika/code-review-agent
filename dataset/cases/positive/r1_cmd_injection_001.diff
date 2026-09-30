@@ -1,0 +1,9 @@
+--- a/tool.go
++++ b/tool.go
+@@ -1,2 +1,6 @@
+ package tool
+ 
++func runCmd(input string) ([]byte, error) {
++	out, err := exec.Command("sh", "-c", input).Output()
++	return out, err
++}

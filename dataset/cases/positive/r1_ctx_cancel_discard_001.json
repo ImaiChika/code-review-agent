@@ -1,0 +1,11 @@
+{
+  "id": "r1_ctx_cancel_discard_001",
+  "description": "R1：WithDeadline 返回的 cancel 从未调用（与 WithTimeout 变体互补；_ 丢弃变体因 ERR-AST-001 已知噪音暂不入数据集，单测覆盖）",
+  "category": "lifecycle",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "CTX-AST-001", "file": "worker.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -422,7 +422,7 @@ rules:
 
 | # | 能力 | 状态 | 证据 / 差距 |
 |---|------|------|------------|
-| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**（`skill.NewFSRepository` → 报告 `skill` 字段含 name/version/loaded）；规则 ≥4 类要求达成（实际 7 类全覆盖；专项缺口与竞品差距见 §八） |
+| 1 | CR Skill（SKILL.md + 规则文档 + 脚本） | ✅ | `skills/code-review/` 三件套齐全；**M1-B1 起运行时真加载**；规则 ≥4 类要求达成（实际 10 条规则覆盖 7 类；R1 补齐命题点名的 context 缺口并新增 SQL/命令注入，见 §八） |
 | 2 | 沙箱执行（container/e2b，local 仅 fallback） | ✅ | container 手写版 ✅；container-fx（框架 Docker SDK）✅ **CI 实机验证**（网络隔离/只读/非 root/env 白名单）；e2b 云沙箱 ✅ **实机验证**（创建/staging/执行/脱敏/审计；Go 模板需 E2B_TEMPLATE）；均带回退链 |
 | 3 | 工具链接入（高风险命令先过 PermissionPolicy） | ✅ | **M1-B2 起走框架权限体系**：`SafetyFilter.AsPermissionPolicy()` → `tool.PermissionPolicy`，每条沙箱命令经 `policy.CheckToolPermission`，deny/ask 不进沙箱，决策落 `cr_permission_decisions`；命令面仍为 2 条固定命令 |
 | 4 | 输入解析（unified diff / 文件列表 / git 工作区） | ✅ | diff 文件 ✅、git 工作区 ✅、**文件路径列表 ✅（M2-D5 `--files`/`ReadFromFilePaths`，整体按新增行审查）** |
@@ -758,7 +758,8 @@ rules:
 > - 🔑 **密钥持久化（2026-09-30）**：千问（dashscope/qwen3.8-flash）与 E2B 两把 key 已双写持久化——`cr_settings` 表（服务真相源，网页设置中心管理）+ `.env`（gitignored 镜像备份，docker compose 透传 `OPENAI_API_KEY`/`E2B_API_KEY`）。**测试/清理现场时禁止删除或覆盖 `review.db` 与 `.env`**（此前"恢复现场"流程会回滚 review.db，恢复前必须先备份 cr_settings）。E2B key 已真机验证：最小沙箱跑通 + 服务端 API 端到端（规则 3 findings + e2b 后端 go vet exit 0；go test/staticcheck 127 为已知默认模板无 Go 工具链，需 E2B_TEMPLATE）。云端多用户迁移（每用户上传自己的密钥）登记为 E8。
 > - ✅ **体验澄清四连修（2026-09-30，用户实测反馈）**：① **LLM 显示协议名误导**——结果里"LLM 复核 openai"实为 OpenAI 兼容协议名而非服务商；`Monitor.LLMModel` 记录实际模型名（fake 模式记 "fake（确定性回放）"），前端改为显示模型名（实测 "LLM 复核 qwen3.8-flash · 送审 2 · 剔除 2"）。② **沙箱语义不可见**——沙箱选项从"仓库路径"标签内移到全局表单区：非仓库模式开关置灰 + 人话原因（"粘贴/上传/PR 只有变更片段，没有完整工程"），任务详情"沙箱执行"空表也写明原因（按输入类型区分文案）；仓库模式提示将运行的三条命令。③ **任务命名**——`task_name` 全链路（列迁移 task_name / CreateTask / report.task_name / API 入参 + upload `?task_name=`；80 字 rune 截断），任务列表/看板/详情名称优先展示。④ **任务详情去模糊化**——"权限决策"更名"安全审批记录"（帮助文案解释 allow/deny 与留痕语义），监控标签白话化（工具调用→沙箱命令、产物→报告归档、权限拦截→安全拦截），安全审批/执行统计/元数据三项默认折叠进"高级审计信息"。测试：review +1（TaskName+LLMModel）、server +1（task_name 截断透传）；浏览器实测：diff 模式沙箱禁用带原因、详情折叠/展开、名称三处展示、真实 LLM 模型名显示。
 > - ✅ **面向客户的全站文案去黑话（2026-09-30，用户反馈"出厂"徽章不可懂后全量排查）**：① 设置页方案卡片移除"出厂"徽章（预置/自建对用户无意义，均可编辑删除），重置入口改"恢复预置方案"；② 枚举值不再裸奔——输入类型/任务状态/输入路径全面中文化（diff_content→粘贴 DIFF、completed→已完成、api-upload→网页提交；任务列表/详情/Markdown 报告/HTML 报告同套映射 `report.InputTypeLabel/DisplayInputPath`）；③ 看板规则排行显示规则中文名（ID 缩为小字）；业务管线 STEP 描述全部白话（"go/scanner 词法事实匹配"→"扫描新增代码，按规则找出可疑写法"等 8 条）；分类"生命周期"→"数据库事务"；④ "Skill code-review 1.0.0"→"审查引擎"移入高级审计"执行统计"面板（HTML 报告同步）；"已注册规则"→"已加载规则"、"内置"→"系统自带"、"写操作认证"→"认证保护"、"去重移除"→"重复剔除"、Base URL 加悬浮解释。13 包全绿；浏览器逐页验证（设置/看板/规则/列表/详情）。
-> - ⏭ 下一步：D3 go/types 类型增强（repo 模式加载类型信息，RES/ERR 规则从"猜"变"知道"）。
+> - ✅ **R1 命题缺口批次完成（2026-09-30，§八 R 系列第一批）**：① **CTX-AST-001**（`rules/context_leak.go`）——WithCancel/WithTimeout/WithDeadline/WithCancelCause 四构造提取 cancel 变量名，全量新增行搜 `cancel(`；命名变体 medium/0.75（cancel 可能在未变更代码，hunk 不可见）、`_` 丢弃变体 high/0.85（确定性）。② **SEC-AST-003**（`rules/sql_injection.go`）——SQL 语句形态字面量 + 拼接/Sprintf 双条件；参数化（?/$N）与纯常量拼接豁免。③ **SEC-AST-004**（`rules/command_injection.go`）——可执行文件变量、shell 字面量 + 动态参数、syscall.Exec；全字面量豁免（保住 sandbox_failure fixture）。④ **SEC-AST-002** 扩表（ghu/s/r/glpat-/AIza/npm_/SG./Bearer）+ **mask.go 五正则同步 + gh 前缀补 r**。⑤ 数据集 +13 样本（7 正 + 5 陷阱 + 1 脱敏），**标注先于实现**（首跑 FN=16 门禁红验证标注有效）；修一个样本设计错误（`_, cancel :=` 会与 ERR-AST-001 噪音共报，改 WithDeadline 命名变体，`_` 丢弃留单测）。注册点 5 处（review/server/integration_test/dataset harness）；文档 README/RULES.md/前端管线计数同步（7→10 条）。测试：rules +15 单测（正例/陷阱/豁免/变体/脱敏同步）；门禁 **52 样本 100%/100%/0%**；13 包 `-race` 全绿。
+> - ⏭ 下一步：R2 单行规则批量 → R3 误报抑制①② → D3。
 
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
@@ -968,7 +969,7 @@ rules:
 | `recover()` 不在 defer 行 | #2348 | 单行判断，panic/recover 维度我们完全空缺 | DSL 或 `ERR-AST-002` |
 | timer/ticker/订阅未停止 | #2375 | NewTimer/NewTicker 无对应 Stop，后台资源累积 | 并入 RES-AST-002 |
 
-**密钥 token 覆盖面差距**（SEC-AST-002 `detectLeakPattern` 扩充）：GitHub 五前缀 `gh[pousr]_`（我们只认 `ghp_`，#2318）、GitLab `glpat-`、Google `AIza`、Slack 全系、SendGrid `SG.`、`npm_`（#2369/#2375）、Bearer 头。
+**密钥 token 覆盖面差距**（SEC-AST-002 `detectLeakPattern` 扩充）：GitHub 五前缀 `gh[pousr]_`（我们只认 `ghp_`，#2318）、GitLab `glpat-`、Google `AIza`、SendGrid `SG.`、`npm_`（#2369/#2375）、Bearer 头。（注：`gho_` 检测侧原已覆盖，Slack `xox` 原已覆盖——实际缺口为 ghu_/ghs_/ghr_/glpat-/AIza/npm_/SG./Bearer，已全部落地。）
 
 > 📌 **2026-09-30 对照代码核实注记**：① `AKIA[0-9A-Z]{16}` 长度校验**检测/脱敏两侧均已存在**（`rules/token_rules.go` AKIA+后16位大写字母数字校验、`safety/mask.go` 同款正则），从差距清单移除；② 本项不是"纯扩表"——检测表扩充必须**同步 `safety/mask.go` 脱敏表**，否则新前缀检出后 evidence 里的明文会击穿脱敏硬门禁（两处同一提交内完成）；③ 每加一条规则/前缀都要跑**全量数据集回归**而非只看新样本（见 §8.5 第 5 步注记）。
 
@@ -992,7 +993,7 @@ rules:
 
 | 批次 | 内容 | 批次专项标准 |
 |------|------|-------------|
-| **R1 命题缺口**（最高优先） | CTX-AST-001 context 泄漏；SEC-AST-003 SQL 注入；SEC-AST-004 命令注入；SEC-AST-002 token 前缀扩充（ghpousr_/glpat-/AIza/Bearer；同步 mask.go 脱敏表） | 每条 ≥2 正样本 + ≥1 陷阱负样本，标注先于实现 |
+| **R1 命题缺口**（最高优先）✅（2026-09-30） | CTX-AST-001 context 泄漏 ✅；SEC-AST-003 SQL 注入 ✅；SEC-AST-004 命令注入 ✅；SEC-AST-002 token 前缀扩充（ghu/s/r、glpat-、AIza、npm_、SG.、Bearer；mask.go 同步 ✅） | 每条 ≥2 正样本 + ≥1 陷阱负样本，标注先于实现 ✅（新增 8 样本：7 正 + 5 陷阱负 + 1 脱敏；门禁 52 样本 100%/100%/0%）|
 | **R2 单行规则批量** | DSL：InsecureSkipVerify、time.Tick、recover 误用；内置：CTX-AST-002 context 替换、CON-AST-001 mutex、RES-AST-002 defer-in-loop + timer/ticker、DB-AST-002 rows.Err | 单行类规则 confidence ≤ 0.75 或走 warnings，防拉高误报率 |
 | **R3 误报抑制深化** | RES-AST-001 变量名级匹配 + 同块限定；ERR-AST-001 白名单；SEC-AST-001 placeholder/env 豁免 | 陷阱负样本误报清零，既有正样本检出不回退 |
 | **R4 按需/降级** | 事务内 HTTP 调用、连接池未配置、DB 句柄所有权、日志侧敏感泄漏、裸 `return err`、循环内字符串拼接、correctness 类（nil/边界，归 LLM 复核提示词） | 逐条评估，低置信一律 warnings 通道；数据竞争/跨函数类随 M4 |

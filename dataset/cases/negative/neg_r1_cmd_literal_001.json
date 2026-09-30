@@ -1,0 +1,9 @@
+{
+  "id": "neg_r1_cmd_literal_001",
+  "description": "R1 陷阱：sh -c 后接完整字面量命令，SEC-AST-004 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

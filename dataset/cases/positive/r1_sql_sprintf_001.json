@@ -1,0 +1,11 @@
+{
+  "id": "r1_sql_sprintf_001",
+  "description": "R1：fmt.Sprintf 将变量格式化进 SQL 语句（SQL 注入，SEC-AST-003）",
+  "category": "security",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-003", "file": "repo.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

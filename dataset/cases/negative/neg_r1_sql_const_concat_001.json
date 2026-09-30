@@ -1,0 +1,9 @@
+{
+  "id": "neg_r1_sql_const_concat_001",
+  "description": "R1 陷阱：常量 SQL 与常量片段拼接（无非字面量输入），SEC-AST-003 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

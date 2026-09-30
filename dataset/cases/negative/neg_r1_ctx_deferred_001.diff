@@ -1,0 +1,14 @@
+--- a/fetch.go
++++ b/fetch.go
+@@ -1,2 +1,10 @@
+ package fetch
+ 
++func load() error {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++	defer cancel()
++	req, err := http.NewRequestWithContext(ctx, "GET", "https://example.com", nil)
++	if err != nil {
++		return err
++	}
++	return doFetch(req)
++}

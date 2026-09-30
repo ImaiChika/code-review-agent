@@ -1,0 +1,11 @@
+--- a/conf.go
++++ b/conf.go
+@@ -1,2 +1,8 @@
+ package conf
+ 
++var v1 = "glpat-AbCdEfGhIjKlMnOpQrStUv"
++var v2 = "AIzaSyA1234567890abcdefghijklmnopqrstuvwxy"
++var v3 = "npm_0123456789012345678901234567890abcd"
++var v4 = "Authorization: Bearer AbCdEfGhIjKlMnOpQrStUvWxYz"
++var v5 = "ghs_0123456789abcdefghijklmnopqrstuvwxyz"
++var v6 = "SG.abcdefghijklmnopqrstuvwxyZ1234567.abcdefghijklmnopqrstuvwxyz123456"

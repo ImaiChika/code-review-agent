@@ -227,6 +227,32 @@ func detectLeakPattern(s string) (bool, string, float64) {
 			return true, "Token 感知：数据库连接串泄漏（含密码）", 0.95
 		}
 	}
+	// R1：GitHub 其余前缀（gho_ 已在上方覆盖）
+	for _, p := range []string{"ghu_", "ghs_", "ghr_"} {
+		if strings.HasPrefix(s, p) && len(s) >= 35 {
+			return true, "Token 感知：GitHub Token 泄漏", 0.95
+		}
+	}
+	// R1：GitLab Personal Access Token
+	if strings.HasPrefix(s, "glpat-") && len(s) >= 25 {
+		return true, "Token 感知：GitLab Access Token 泄漏", 0.95
+	}
+	// R1：Google API Key
+	if strings.HasPrefix(s, "AIza") && len(s) >= 35 {
+		return true, "Token 感知：Google API Key 泄漏", 0.95
+	}
+	// R1：npm 访问令牌
+	if strings.HasPrefix(s, "npm_") && len(s) >= 35 {
+		return true, "Token 感知：npm 访问令牌泄漏", 0.95
+	}
+	// R1：SendGrid API Key（SG. xxx . yyy 双段）
+	if strings.HasPrefix(s, "SG.") && strings.Count(s, ".") >= 2 && len(s) >= 40 {
+		return true, "Token 感知：SendGrid API Key 泄漏", 0.95
+	}
+	// R1：Bearer 头携带长凭据（排除占位符形态）
+	if bearerToken := bearerLeakToken(s); bearerToken != "" {
+		return true, "Token 感知：Bearer 凭据硬编码", 0.90
+	}
 	// URL with credentials
 	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 		atIdx := strings.Index(s, "@")
@@ -1057,4 +1083,36 @@ func isTestFile(path string) bool {
 
 func isMainOrTestFile(path string) bool {
 	return isTestFile(path) || path == "main.go" || strings.HasSuffix(path, "/main.go") || strings.Contains(path, "cmd/")
+}
+
+// bearerLeakToken 提取字面量中 "Bearer <长凭据>" 的凭据部分；
+// 占位符形态（<your-…>、含 your/xxx/example/changeme）返回空。
+func bearerLeakToken(s string) string {
+	idx := strings.Index(s, "Bearer")
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(s[idx+len("Bearer"):])
+	rest = strings.Trim(rest, "\"'") // 可能紧贴引号
+	runes := []rune(rest)
+	n := 0
+	for _, c := range runes {
+		if c == '.' || c == '_' || c == '-' || c == '/' || c == '+' ||
+			(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			n++
+		} else {
+			break
+		}
+	}
+	if n < 25 {
+		return ""
+	}
+	token := rest[:n]
+	lower := strings.ToLower(token)
+	for _, ph := range []string{"your", "xxx", "example", "changeme", "placeholder"} {
+		if strings.Contains(lower, ph) {
+			return ""
+		}
+	}
+	return token
 }

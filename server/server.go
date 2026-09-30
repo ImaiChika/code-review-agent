@@ -845,7 +845,10 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	engine.Register(rules.NewTokenResourceRule())
 	engine.Register(rules.NewTokenErrorRule())
 	engine.Register(rules.NewTokenMissingTestRule())
-	engine.Register(rules.NewTokenDBLifecycleRule()) // M2-D4
+	engine.Register(rules.NewTokenDBLifecycleRule())      // M2-D4
+	engine.Register(rules.NewTokenContextCancelRule())    // R1：CTX-AST-001
+	engine.Register(rules.NewTokenSQLInjectionRule())     // R1：SEC-AST-003
+	engine.Register(rules.NewTokenCommandInjectionRule()) // R1：SEC-AST-004
 
 	ruleList := make([]ruleMeta, 0, 6)
 	for _, rule := range engine.Rules() {

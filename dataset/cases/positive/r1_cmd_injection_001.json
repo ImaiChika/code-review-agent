@@ -1,0 +1,11 @@
+{
+  "id": "r1_cmd_injection_001",
+  "description": "R1：exec.Command sh -c 的命令内容来自变量（命令注入，SEC-AST-004）",
+  "category": "security",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-004", "file": "tool.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

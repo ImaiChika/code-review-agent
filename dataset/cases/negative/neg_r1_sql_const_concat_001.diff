@@ -1,0 +1,10 @@
+--- a/repo.go
++++ b/repo.go
+@@ -1,2 +1,7 @@
+ package repo
+ 
++const baseSQL = "SELECT id, name FROM users"
++
++func list() (*userRow, error) {
++	return queryOne(baseSQL + " ORDER BY id")
++}

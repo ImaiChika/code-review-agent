@@ -1,0 +1,9 @@
+{
+  "id": "neg_r1_ctx_deferred_001",
+  "description": "R1 陷阱：defer cancel() 与开启同处变更内（规范写法），CTX-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,16 @@
+{
+  "id": "r1_token_prefix_001",
+  "description": "R1：SEC-AST-002 token 前缀扩充——glpat-/AIza/npm_/Bearer/ghs_/SendGrid 各一行（行 3-8）",
+  "category": "sensitive_leak",
+  "difficulty": "medium",
+  "expected_findings": [
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 3},
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 4},
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 5},
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 6},
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 7},
+    {"rule_id": "SEC-AST-002", "file": "conf.go", "line": 8}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

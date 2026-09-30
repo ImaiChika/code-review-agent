@@ -1,0 +1,8 @@
+--- a/conf.go
++++ b/conf.go
+@@ -1,2 +1,5 @@
+ package conf
+ 
++var doc = "use tokens like ghp_xxxx or Bearer <your-token-here> in env"
++var short = "Bearer abc"
++var note = "see https://example.com/AIzaDocsPage for docs"

@@ -1,0 +1,9 @@
+--- a/conf.go
++++ b/conf.go
+@@ -1,2 +1,6 @@
+ package conf
+ 
++var a = "glpat-AbCdEfGhIjKlMnOpQrStUv"
++var b = "AIzaSyA1234567890abcdefghijklmnopqrstuvwxy"
++var c = "Bearer AbCdEfGhIjKlMnOpQrStUvWxYz"
++var d = "ghs_0123456789abcdefghijklmnopqrstuvwxyz"
