@@ -1,0 +1,9 @@
+--- a/conf.go
++++ b/conf.go
+@@ -1,2 +1,6 @@
+ package conf
+ 
++func load() (*Cfg, error) {
++	apiKey := os.Getenv("PROD_API_KEY_VALUE")
++	return &Cfg{Key: apiKey}, nil
++}

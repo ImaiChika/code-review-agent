@@ -65,6 +65,12 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 
 		// 检查 1：赋值语句中，左侧敏感标识符，右侧字符串字面量
 		if ident, value, ok := analysis.GetAssignedValue(); ok {
+			// R3③：值来自环境变量/密钥管理服务时不是硬编码（豁免在命中判断前）
+			if strings.Contains(content, "os.Getenv(") ||
+				strings.Contains(content, "os.LookupEnv(") ||
+				strings.Contains(content, "secretmanager") {
+				continue
+			}
 			if isSensitiveIdent(ident) && !isLikelyNotSecret(value) {
 				f := findings.NewFinding(
 					r.Severity(), r.Category(), r.ID(),
@@ -429,7 +435,6 @@ var resourceOpenCalls = map[string]string{
 	"sql.Open(":      ".Close()",
 	".Conn(":         ".Close()",
 	".Query(":        ".Close()",
-	".QueryRow(":     ".Close()",
 	".Prepare(":      ".Close()",
 	"net.Dial(":      ".Close()",
 	"net.Listen(":    ".Close()",
@@ -467,7 +472,16 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 				if strings.Contains(content, call) {
 					// 构造器语义：句柄被 return 交给调用方时关闭责任已转移，不算本函数泄漏
 					handleVar := strings.TrimSuffix(extractVarNameToken(content), ".")
-					if !hasCloseInLines(fileLines, closeMethod) &&
+					// R3①：变量名级匹配——`f, err := os.Open(a)` 提取 f，精确查 f.Close()；
+					// 替代旧"文件任意行有 Close 就放过"（抓不到同文件多句柄只关一个的泄漏）。
+					// 解析不出变量名时退回行文本级（保守降级）。
+					closed := false
+					if handleVar != "" {
+						closed = hasCloseInLines(fileLines, handleVar+closeMethod)
+					} else {
+						closed = hasCloseInLines(fileLines, closeMethod)
+					}
+					if !closed &&
 						!ownershipTransferredByReturn(fileLines, handleVar) {
 						f := findings.NewFinding(
 							r.Severity(), r.Category(), r.ID(),
@@ -667,9 +681,12 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 	}
 
 	// 排除安全的忽略
+	// R3②：错误返回调用的已知安全忽略面白名单（#2318/#2348）
 	safeIgnores := []string{
 		"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",
 		".Write(", ".Close()", "w.Write", "f.Write",
+		".Commit()", ".Rollback()", "os.Remove(", "os.RemoveAll(",
+		"json.Unmarshal(", "json.NewDecoder(", ".Scan(", ".Encode(",
 	}
 	for _, safe := range safeIgnores {
 		if strings.Contains(content, safe) {

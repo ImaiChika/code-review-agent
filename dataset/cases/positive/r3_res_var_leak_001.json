@@ -1,0 +1,11 @@
+{
+  "id": "r3_res_var_leak_001",
+  "description": "R3：变量级匹配——f1 与 f2 各自打开，仅 f2.Close()；行文本级\"有 Close 就放过\"的旧手法抓不到 f1 泄漏（RES-AST-001 深化正样本）",
+  "category": "resource",
+  "difficulty": "hard",
+  "expected_findings": [
+    {"rule_id": "RES-AST-001", "file": "copy.go", "line": 4}
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

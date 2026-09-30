@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_env_getenv_001",
+  "description": "R3 陷阱：值来自 os.Getenv（环境变量），即便变量名敏感、env 名再长也不是硬编码，SEC-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

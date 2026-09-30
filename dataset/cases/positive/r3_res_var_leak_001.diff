@@ -1,0 +1,17 @@
+--- a/copy.go
++++ b/copy.go
+@@ -1,2 +1,13 @@
+ package copy
+ 
++func copyFile(a, b string) {
++	f1, err := os.Open(a)
++	if err != nil {
++		return
++	}
++	f2, err := os.Open(b)
++	if err != nil {
++		return
++	}
++	defer f2.Close()
++	use(f1, f2)
++}

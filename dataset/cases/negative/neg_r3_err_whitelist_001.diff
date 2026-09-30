@@ -1,0 +1,11 @@
+--- a/util.go
++++ b/util.go
+@@ -1,2 +1,7 @@
+ package util
+ 
++func parse(data []byte, tmp string) (Item, error) {
++	_ = os.Remove(tmp)
++	var v Item
++	_ = json.Unmarshal(data, &v)
++	return v, nil
++}

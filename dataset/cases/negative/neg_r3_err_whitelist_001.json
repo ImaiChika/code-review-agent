@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_err_whitelist_001",
+  "description": "R3 陷阱：白名单调用（os.Remove/json.Unmarshal）的 _ 丢弃是已知安全忽略面，ERR-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}
