@@ -1,0 +1,9 @@
+--- a/t.go
++++ b/t.go
+@@ -1,2 +1,6 @@
+ package t
+
++func snapshot(m model.Message) []byte {
++	data, _ := json.Marshal(m)
++	return data
++}

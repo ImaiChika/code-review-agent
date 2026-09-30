@@ -1,0 +1,8 @@
+--- a/r.go
++++ b/r.go
+@@ -1,2 +1,5 @@
+ package r
+
++func cleanup(registerCtx context.Context) {
++	_ = registerCtx
++}

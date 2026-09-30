@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_errorsas_001",
+  "description": "R3 陷阱：errors.As 惯用法（_, isX := y.AsXxx(err)），第二变量是断言结果非错误——真实框架代码误报猎捕产出",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

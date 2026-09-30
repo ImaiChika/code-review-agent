@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_varassign_001",
+  "description": "R3 陷阱：_ = 纯变量赋值（显式忽略标记，右侧无调用），ERR-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

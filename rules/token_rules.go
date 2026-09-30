@@ -675,6 +675,50 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 		return false
 	}
 
+	// R3②延伸（真实代码误报猎捕，2026-09-30）：三类 `_` 惯用法与错误无关
+	// a) `var _ I = ...` 编译期接口断言（必须 var 前缀；裸 `_ =` 是真实丢弃不豁免）
+	if strings.HasPrefix(strings.TrimSpace(content), "var ") {
+		return false
+	}
+	rhs := ""
+	if i := strings.LastIndex(content, "="); i >= 0 {
+		rhs = strings.TrimSpace(content[i+1:])
+	}
+	// d) `_ = someVar`：纯变量赋值（清理/显式忽略标记），右侧无函数调用
+	if !strings.Contains(rhs, "(") {
+		return false
+	}
+	// e) errors.As 惯用法：`_, isX := y.AsXxx(err)`，第二变量是断言结果非错误
+	if regexp.MustCompile(`\.[A-Z]?As[A-Z]`).MatchString(rhs) {
+		return false
+	}
+	lhs := content
+	if i := strings.Index(content, ":="); i >= 0 {
+		lhs = content[:i]
+	} else if i := strings.Index(content, "="); i >= 0 {
+		lhs = content[:i]
+	}
+	lhs = strings.TrimSpace(lhs)
+	parts := strings.Split(lhs, ",")
+	// b) comma-ok 惯用法：`_, x := m[k]` 首位丢弃 + 右侧索引表达式 = 存在性检查
+	//   （第二变量名任意：ok/enabled/…），不是错误丢弃
+	if len(parts) >= 2 && strings.TrimSpace(parts[0]) == "_" &&
+		strings.Contains(content[strings.LastIndex(content, "=")+1:], "[") {
+		return false
+	}
+	// 命名 ok 的类型断言/多返回值形态
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "ok" {
+			return false
+		}
+	}
+	// c) error 变量已被接收（`_, err = ...` / `err, _ := ...`）——丢弃的是非 error 位置
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "err" {
+			return false
+		}
+	}
+
 	// R3 提前项：range 循环的 `_` 是惯用占位（for _, v := range …），与错误无关
 	if strings.Contains(content, "range") && strings.Contains(content, "for") {
 		return false
@@ -686,7 +730,8 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 		"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",
 		".Write(", ".Close()", "w.Write", "f.Write",
 		".Commit()", ".Rollback()", "os.Remove(", "os.RemoveAll(",
-		"json.Unmarshal(", "json.NewDecoder(", ".Scan(", ".Encode(",
+		"json.Unmarshal(", "json.NewDecoder(", "json.Marshal(", ".Scan(", ".Encode(",
+		".EmitEvent(",
 	}
 	for _, safe := range safeIgnores {
 		if strings.Contains(content, safe) {
@@ -1079,6 +1124,11 @@ func isSensitiveIdent(ident string) bool {
 
 func isLikelyNotSecret(value string) bool {
 	value = strings.Trim(value, "\"'`")
+	// R3②延伸：含格式动词的是格式串模板（"password=%s"），不是密钥本身
+	if strings.Contains(value, "%s") || strings.Contains(value, "%d") ||
+		strings.Contains(value, "%v") || strings.Contains(value, "%q") {
+		return true
+	}
 	if len(value) < 8 {
 		return true
 	}

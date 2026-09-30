@@ -1,0 +1,12 @@
+--- a/m.go
++++ b/m.go
+@@ -1,2 +1,8 @@
+ package m
+
++func has(k string) bool {
++	_, ok := table[k]
++	_, enabled := enabledSets[k]
++	if !ok {
++	}
++	return ok
++}

@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_commaok_001",
+  "description": "R3 陷阱：map comma-ok 惯用法（_, ok :=）与错误无关，ERR-AST-001 不得上报（真实框架代码误报猎捕产出）",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

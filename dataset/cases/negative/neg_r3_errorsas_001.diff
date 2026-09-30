@@ -1,0 +1,9 @@
+--- a/e2.go
++++ b/e2.go
+@@ -1,2 +1,7 @@
+ package e2
+
++func isTimeout(err error, agent *Agent) bool {
++	_, isWait := agent.AsWaitNoticeTimeoutError(err)
++	return isWait
++}

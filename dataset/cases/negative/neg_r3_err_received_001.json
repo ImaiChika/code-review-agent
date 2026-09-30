@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_err_received_001",
+  "description": "R3 陷阱：_, err = 形态——error 位置已被接收，丢弃的是 Result（非 error），ERR-AST-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

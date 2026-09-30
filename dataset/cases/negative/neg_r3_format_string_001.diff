@@ -1,0 +1,8 @@
+--- a/log.go
++++ b/log.go
+@@ -1,2 +1,6 @@
+ package log
+
++func audit(w io.Writer, user, pass string) {
++	fmt.Fprintf(w, " user=%s password=%s", user, pass)
++}

@@ -1,0 +1,8 @@
+--- a/e.go
++++ b/e.go
+@@ -1,2 +1,5 @@
+ package e
+
++func emit(agent Agent, evt Event) {
++	_ = agent.EmitEvent(context.Background(), base, out, evt)
++}

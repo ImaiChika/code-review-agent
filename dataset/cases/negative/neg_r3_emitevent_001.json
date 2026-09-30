@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_emitevent_001",
+  "description": "R3 陷阱：事件发射（EmitEvent）失败忽略属遥测可忽略面——真实框架代码误报猎捕产出",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "neg_r3_varblank_001",
+  "description": "R3 陷阱：var _ 编译期接口断言/包级注册，ERR-AST-001 不得上报（注意与裸 _ = writeAll() 真实丢弃区分）",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

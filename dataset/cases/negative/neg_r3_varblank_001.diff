@@ -1,0 +1,8 @@
+--- a/s.go
++++ b/s.go
+@@ -1,2 +1,5 @@
+ package s
+
++var _ memory.Service = (*Service)(nil)
++
++var _ = registerFallback
