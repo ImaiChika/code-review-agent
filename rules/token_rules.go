@@ -309,6 +309,10 @@ func (r *TokenGoroutineRule) Severity() findings.Severity { return findings.Seve
 func (r *TokenGoroutineRule) Category() findings.Category { return findings.CategoryResource }
 
 func (r *TokenGoroutineRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
+	// W1：go.mod/非 Go 文件不适用（"go 1.21" 会被误判为 goroutine）
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	var result []findings.Finding
 
 	for _, hunk := range fd.Hunks {

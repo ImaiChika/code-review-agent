@@ -804,7 +804,7 @@ func query(name string) string {
 	}
 	inc := rep2.Incremental
 	if inc == nil {
-		t.Fatal("第二轮应有增量对比")
+		t.Fatalf("第二轮应有增量对比")
 	}
 	if inc.BaseTaskID != rep1.TaskID {
 		t.Errorf("对比基准应为第一轮任务 %s, got %s", rep1.TaskID, inc.BaseTaskID)
@@ -828,5 +828,124 @@ func query(name string) string {
 	// 复发：writeAll 的忽略错误两轮都有
 	if !has(inc.RecurFindings, "ERR-AST-001") {
 		t.Errorf("ERR-AST-001 应为复发: 新增%+v 复发%+v", inc.NewFindings, inc.RecurFindings)
+	}
+}
+
+// TestRun_RepoURL_CloneAndReview D3+D7 串测：远端仓库（本地 bare remote 模拟）
+// 克隆 → 全文件整体审查 → 第二轮增量对比（新增/已消失）。
+func TestRun_RepoURL_CloneAndReview(t *testing.T) {
+	base := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v 失败: %v\n%s", args, err, out)
+		}
+	}
+	// 源仓库（普通）→ 推到 bare remote（模拟远端）
+	src := filepath.Join(base, "src")
+	os.MkdirAll(src, 0755)
+	run("init", "-q", src)
+	run("-C", src, "config", "user.email", "t@t.co")
+	run("-C", src, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(src, "go.mod"), []byte("module repourl\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	v1 := `package app
+
+func auth() string {
+	password := "hunter2-url-v1"
+	return password
+}
+`
+	if err := os.WriteFile(filepath.Join(src, "app.go"), []byte(v1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", src, "add", "-A")
+	run("-C", src, "commit", "-qm", "v1")
+	remote := filepath.Join(base, "remote.git")
+	run("clone", "-q", "--bare", src, remote)
+
+	dbPath := filepath.Join(base, "review.db")
+	outDir := t.TempDir()
+
+	// ── 第一轮：克隆 + 整体审查 ──
+	rep1, err := Run(Options{
+		RepoURL:     remote, // 本地路径作为远端（git clone 支持任意 URL）
+		DBPath:      dbPath,
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("第一轮失败: %v", err)
+	}
+	if rep1.InputType != "repo_url" {
+		t.Errorf("InputType = %q, 期望 repo_url", rep1.InputType)
+	}
+	hasSecret := false
+	for _, f := range rep1.Findings {
+		if f.RuleID == "SEC-AST-001" {
+			hasSecret = true
+		}
+	}
+	if !hasSecret {
+		t.Error("整体审查应检出硬编码密码")
+	}
+
+	// ── 第二轮：修复密码 + 新增 SQL 拼接 → 增量对比 ──
+	v2 := `package app
+
+func auth() string {
+	return "from-config"
+}
+
+func query(name string) string {
+	return "SELECT * FROM users WHERE name = '" + name + "'"
+}
+`
+	if err := os.WriteFile(filepath.Join(src, "app.go"), []byte(v2), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", src, "add", "-A")
+	run("-C", src, "commit", "-qm", "v2")
+	run("-C", src, "push", "-q", remote, "HEAD:refs/heads/main")
+
+	rep2, err := Run(Options{
+		RepoURL:     remote,
+		DBPath:      dbPath,
+		OutputDir:   outDir,
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("第二轮失败: %v", err)
+	}
+	inc := rep2.Incremental
+	if inc == nil {
+		t.Fatalf("第二轮应有增量对比")
+	}
+	has := func(list []report.FindingRef, rule string) bool {
+		for _, f := range list {
+			if f.RuleID == rule {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(inc.NewFindings, "SEC-AST-003") {
+		t.Errorf("SQL 拼接应为新增: %+v", inc.NewFindings)
+	}
+	if !has(inc.GoneFindings, "SEC-AST-001") {
+		t.Errorf("密码修复应为已消失: %+v", inc.GoneFindings)
+	}
+}
+
+// TestRedactToken 克隆错误脱敏：token 不落任务记录。
+func TestRedactToken(t *testing.T) {
+	in := "fatal: could not read Username for 'https://x-access-token:ghp_SUPERSECRET@github.com/owner/repo': terminal prompts disabled"
+	out := redactToken(in)
+	if strings.Contains(out, "ghp_SUPERSECRET") {
+		t.Errorf("token 未脱敏: %q", out)
+	}
+	if !strings.Contains(out, "***") {
+		t.Errorf("应有 *** 占位: %q", out)
 	}
 }

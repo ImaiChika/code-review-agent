@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -285,6 +286,8 @@ type createReviewRequest struct {
 	RepoPath       string            `json:"repo_path"`       // git 仓库路径（取未提交变更，服务器本地）
 	FilesContent   map[string]string `json:"files_content"`   // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
 	PrURL          string            `json:"pr_url"`          // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
+	RepoURL        string            `json:"repo_url"`        // GitHub 仓库链接：https://github.com/{owner}/{repo}（整体审查，自动克隆）
+	RepoRef        string            `json:"repo_ref"`        // 可选：分支/tag/commit
 	TaskName       string            `json:"task_name"`       // M8：用户可读的任务名称（可空，≤80 字，超长截断）
 	Sandbox        bool              `json:"sandbox"`         // 是否执行沙箱（仅 repo_path 有效）
 	SandboxBackend string            `json:"sandbox_backend"` // M8-设置中心：local / container / container-fx / e2b；空 = 服务默认
@@ -300,6 +303,23 @@ func sanitizeTaskName(s string) string {
 		s = string(runes[:80]) // 名称上限 80 字符（按 rune，中英文一致）
 	}
 	return s
+}
+
+// repoURLRe GitHub 仓库链接形态（支持 https 前缀可选、.git 后缀可选）。
+var repoURLRe = regexp.MustCompile(`^(?:(?:https?://)?github\.com/)?([A-Za-z0-9-_.]+)/([A-Za-z0-9-_.]+?)(?:\.git)?$`)
+
+// parseRepoURL 解析 GitHub 仓库链接，返回 (owner, repo)。
+func parseRepoURL(u string) (string, string, error) {
+	u = strings.TrimSpace(u)
+	m := repoURLRe.FindStringSubmatch(u)
+	if m == nil {
+		return "", "", errors.New("无法识别的 GitHub 仓库链接（期望 https://github.com/{owner}/{repo} 或 {owner}/{repo}）")
+	}
+	// 防路径形态注入：owner/repo 不允许 .. 段
+	if m[1] == ".." || m[2] == ".." || strings.Contains(m[1], "..") || strings.Contains(m[2], "..") {
+		return "", "", errors.New("仓库链接包含不合法的路径段")
+	}
+	return m[1], m[2], nil
 }
 
 // allowedSandboxBackends 沙箱后端白名单（防止任意字符串进沙箱构造器）。
@@ -362,8 +382,8 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.DiffContent == "" && req.RepoPath == "" && len(req.FilesContent) == 0 && req.PrURL == "" {
-		writeErr(w, http.StatusBadRequest, "diff_content / repo_path / files_content / pr_url 必须提供其一")
+	if req.DiffContent == "" && req.RepoPath == "" && len(req.FilesContent) == 0 && req.PrURL == "" && req.RepoURL == "" {
+		writeErr(w, http.StatusBadRequest, "diff_content / repo_path / files_content / pr_url / repo_url 必须提供其一")
 		return
 	}
 
@@ -397,6 +417,18 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		inputType = "pr_url"
 		inputPath = fmt.Sprintf("%s/%s#%s", ref.Owner, ref.Repo, ref.Number)
 		req.DiffContent = diffText // 复用 diff 管线
+	case req.RepoURL != "":
+		// GitHub 仓库整体审查：校验链接形态，克隆在队列内执行（不阻塞 HTTP）
+		owner, repo, perr := parseRepoURL(req.RepoURL)
+		if perr != nil {
+			writeErr(w, http.StatusBadRequest, perr.Error())
+			return
+		}
+		inputType = "repo_url"
+		inputPath = owner + "/" + repo
+		if req.RepoRef != "" {
+			inputPath += "@" + req.RepoRef
+		}
 	case len(req.FilesContent) > 0:
 		// M7-F3：粘贴整文件；按文件名排序保证输出顺序稳定
 		names := make([]string, 0, len(req.FilesContent))
@@ -444,7 +476,7 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	// 沙箱策略：默认关闭；显式要求且给了仓库路径时启用。
 	// M8-设置中心：可按请求指定后端（白名单校验），缺省用服务默认。
 	sandboxMode := review.SandboxOff
-	if req.Sandbox && req.RepoPath != "" {
+	if req.Sandbox && (req.RepoPath != "" || inputType == "repo_url") {
 		if req.SandboxBackend != "" {
 			if !allowedSandboxBackends[req.SandboxBackend] {
 				writeErr(w, http.StatusBadRequest, "不支持的沙箱后端: "+req.SandboxBackend+"（可选 local/container/container-fx/e2b）")
@@ -492,6 +524,12 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	if err := s.injectSettings(&job.opts); err != nil {
 		writeErr(w, http.StatusInternalServerError, "读取设置失败: "+err.Error())
 		return
+	}
+	// repo_url 模式：URL/ref 透传（克隆在队列内执行）
+	if inputType == "repo_url" {
+		job.opts.RepoURL = req.RepoURL
+		job.opts.RepoRef = req.RepoRef
+		job.opts.InputLabel = inputPath
 	}
 	if err := s.queue.submit(job); err != nil {
 		status := http.StatusInternalServerError

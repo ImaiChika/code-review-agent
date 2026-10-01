@@ -305,7 +305,7 @@ function trendSVG(daily) {
 
 function pipelineHTML() {
   const steps = [
-    ["STEP-1", "读取代码", "粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR / 仓库路径"],
+    ["STEP-1", "读取代码", "粘贴 diff / 粘贴代码 / 上传文件 / GitHub PR / 仓库路径 / GitHub 仓库整查"],
     ["STEP-2", "准备规则", "17 条内置规则（含全语言兜底）+ 自定义规则（如有）"],
     ["STEP-3", "逐条检查", "扫描新增代码，按规则找出可疑写法"],
     ["STEP-3.5", "沙箱验证", "在隔离环境运行 go vet / go test（仓库模式可选）"],
@@ -352,6 +352,7 @@ async function viewReview() {
       <div class="tab" id="tab-upload" onclick="switchSource('upload')">上传文件 ${help("选择一个或多个文本文件（.go 等），或一个 zip 压缩包；≤10MB，zip 内 ≤500 个文件、单个 ≤2MB；二进制文件自动跳过")}</div>
       <div class="tab" id="tab-pr" onclick="switchSource('pr')">GitHub PR ${help("粘贴 GitHub PR 链接（github.com/{owner}/{repo}/pull/123）或简写 owner/repo#123，自动拉取该 PR 的 diff 审查。公开仓库无需凭证；服务端配置 GITHUB_TOKEN 可提升限额")}</div>
       <div class="tab" id="tab-repo" onclick="switchSource('repo')">仓库路径 ${help("填写服务器本机 git 仓库路径，取其未提交变更进行审查")}</div>
+      <div class="tab" id="tab-repourl" onclick="switchSource('repourl')">GitHub 仓库 ${help("粘贴 GitHub 仓库链接，服务端自动克隆（浅克隆 depth=1）做整体检查——无需上传代码。私有仓库需服务端配置 GITHUB_TOKEN；跳过 vendor/node_modules，文件数上限 1000")}</div>
     </div>
 
     <div id="src-diff">
@@ -384,6 +385,17 @@ async function viewReview() {
       <div class="field">
         <label>GitHub PR 链接</label>
         <input class="in" id="in-pr" placeholder="https://github.com/owner/repo/pull/123 或 owner/repo#123">
+      </div>
+    </div>
+
+    <div id="src-repourl" style="display:none">
+      <div class="field">
+        <label>仓库链接</label>
+        <input class="in" id="in-repourl" placeholder="https://github.com/owner/repo">
+      </div>
+      <div class="field">
+        <label>分支 / tag（可选，缺省 = 默认分支）</label>
+        <input class="in" id="in-reporef" placeholder="main">
       </div>
     </div>
 
@@ -440,7 +452,7 @@ async function viewReview() {
   } catch { /* 设置读取失败不阻塞审查表单 */ }
 }
 
-const SRC_IDS = ["diff", "code", "upload", "pr", "repo"];
+const SRC_IDS = ["diff", "code", "upload", "pr", "repo", "repourl"];
 
 function switchSource(src) {
   reviewSource = src;
@@ -453,7 +465,7 @@ function switchSource(src) {
   // 沙箱只有仓库模式能跑：其他输入只有变更片段、没有完整工程，跑不了 go vet / go test
   const cb = document.getElementById("cb-sandbox");
   const hint = document.getElementById("sandbox-hint");
-  const isRepo = src === "repo";
+  const isRepo = src === "repo" || src === "repourl";
   if (cb) {
     cb.disabled = !isRepo;
     if (!isRepo) cb.checked = false;
@@ -461,7 +473,7 @@ function switchSource(src) {
   if (hint) {
     hint.textContent = isRepo
       ? "将在沙箱中运行 go vet / go test / staticcheck，并给出每条命令的执行记录"
-      : "沙箱仅在「仓库路径」模式下可用：粘贴 / 上传 / PR 只有变更片段，没有完整工程，无法运行 go vet / go test";
+      : "沙箱仅在「仓库路径」「GitHub 仓库」模式下可用：粘贴 / 上传 / PR 只有变更片段，没有完整工程，无法运行 go vet / go test";
   }
 }
 
@@ -520,6 +532,18 @@ async function submitReview() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(Object.assign({ pr_url: prURL }, llmField(), nameField())),
+    });
+  } else if (reviewSource === "repourl") {
+    const repoURL = document.getElementById("in-repourl").value.trim();
+    const repoRef = document.getElementById("in-reporef").value.trim();
+    if (!repoURL) { log("请填写 GitHub 仓库链接"); return; }
+    submit = () => api("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign(
+        { repo_url: repoURL },
+        repoRef ? { repo_ref: repoRef } : {},
+        llmField(), nameField())),
     });
   } else {
     const repoPath = document.getElementById("in-repo").value.trim();

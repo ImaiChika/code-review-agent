@@ -47,6 +47,9 @@ go build -o code-review-agent .
 # 审查 git 仓库变更
 ./code-review-agent --repo-path /path/to/repo
 
+# 审查 GitHub 仓库（Web 界面「GitHub 仓库」标签，或 API 模式）
+curl -X POST http://localhost:8080/api/reviews -d '{"repo_url":"https://github.com/owner/repo"}'
+
 # 启动 HTTP 服务（Web 前端 + REST API，等价于 scripts/start.sh）
 ./code-review-agent serve --port 8080
 

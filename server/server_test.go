@@ -716,3 +716,35 @@ func TestFPMark_DeleteRequiresAuth(t *testing.T) {
 		t.Errorf("带 token 撤销 status = %d, 期望 200", dres2.StatusCode)
 	}
 }
+
+// TestRepoURLValidation repo_url 入参校验：非法链接 400，合法链接入队。
+func TestRepoURLValidation(t *testing.T) {
+	ts := newTestServer(t)
+
+	// 非法：非 github host / 缺 repo / 路径穿越
+	for _, bad := range []string{
+		`{"repo_url":"https://gitlab.com/owner/repo"}`,
+		`{"repo_url":"https://github.com/only-owner"}`,
+		`{"repo_url":"https://github.com/../etc"}`,
+		`{"repo_url":"not a url"}`,
+	} {
+		resp, _ := http.Post(ts.URL+"/api/reviews", "application/json", strings.NewReader(bad))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("非法 repo_url 应 400: %s → %d", bad, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	// 合法（含简写）：入队 202
+	for _, ok := range []string{
+		`{"repo_url":"https://github.com/owner/repo"}`,
+		`{"repo_url":"github.com/owner/repo.git"}`,
+		`{"repo_url":"owner/repo","repo_ref":"dev"}`,
+	} {
+		resp, _ := http.Post(ts.URL+"/api/reviews", "application/json", strings.NewReader(ok))
+		if resp.StatusCode != http.StatusAccepted {
+			t.Errorf("合法 repo_url 应 202: %s → %d", ok, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+}

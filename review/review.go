@@ -116,6 +116,8 @@ type Options struct {
 	FileContents     []diff.NamedContent // M7-F3：内存文件内容（上传/粘贴），整体按新增行审查
 	Files            []string            // 文件路径列表（M2-D5：整体按新增行审查）
 	RepoPath         string              // git 仓库路径（取未提交变更；此模式才可能触发沙箱）
+	RepoURL          string              // 远端仓库 URL（github.com/…）：自动浅克隆后整体审查，无需上传代码
+	RepoRef          string              // 可选：分支/tag/commit（缺省 = 默认分支）
 	RulesDir         string              // YAML 自定义规则目录（可空）
 	DBPath           string              // SQLite 路径
 	OutputDir        string              // 报告输出目录
@@ -146,8 +148,8 @@ func NewTaskID() string {
 // 流程：读 diff → 规则引擎 → （可选）沙箱 → 去重 → 评分 → 报告 → 落库。
 // 报告文件（review_report.json/md）写入 opts.OutputDir。
 func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
-	if opts.DiffFile == "" && opts.DiffContent == "" && len(opts.FileContents) == 0 && len(opts.Files) == 0 && opts.RepoPath == "" {
-		return nil, errors.New("必须指定 DiffFile / DiffContent / FileContents / Files / RepoPath 之一")
+	if opts.DiffFile == "" && opts.DiffContent == "" && len(opts.FileContents) == 0 && len(opts.Files) == 0 && opts.RepoPath == "" && opts.RepoURL == "" {
+		return nil, errors.New("必须指定 DiffFile / DiffContent / FileContents / Files / RepoPath / RepoURL 之一")
 	}
 	sandboxMode := opts.SandboxMode
 	if sandboxMode == "" {
@@ -180,6 +182,17 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 
 	if opts.Verbose {
 		fmt.Printf("🔍 开始审查任务: %s\n", taskID)
+	}
+
+	// ========== Step 0: 远端仓库克隆（repo_url 模式） ==========
+	// 克隆在异步队列内执行（不阻塞 HTTP）；失败信息已脱敏 token。
+	if opts.RepoURL != "" {
+		tmpDir, err := cloneRepoForReview(opts.RepoURL, opts.RepoRef)
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(tmpDir)
+		opts.RepoPath = tmpDir // 后续全流程（全文件审查/沙箱/类型加载）复用 repo 模式
 	}
 
 	// ========== Step 1: 读取 diff ==========
@@ -229,9 +242,29 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		inputType = "repo_path"
 		inputPath = opts.RepoPath
 		var err error
-		files, err = diff.ReadFromGitDiff(opts.RepoPath)
-		if err != nil {
-			return nil, fmt.Errorf("%w: 读取 git diff 失败: %w", ErrInvalidInput, err)
+		if opts.RepoURL != "" {
+			// repo_url 模式：整体审查——全部文件按新增行审查（等价 --files 语义）；
+			// input_path 取仓库 URL（增量对比按同一 URL 聚焦）
+			inputType = "repo_url"
+			inputPath = opts.RepoURL
+			files, err = readFullRepoFiles(opts.RepoPath)
+			if err == nil {
+				// 路径相对化：克隆目录是随机的临时路径，增量匹配与展示都以
+				// 仓库内相对路径为准（两轮目录不同，绝对路径必然失配）
+				root := opts.RepoPath + string(filepath.Separator)
+				for i := range files {
+					files[i].NewPath = strings.TrimPrefix(files[i].NewPath, root)
+					files[i].OldPath = strings.TrimPrefix(files[i].OldPath, root)
+				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+			}
+		} else {
+			files, err = diff.ReadFromGitDiff(opts.RepoPath)
+			if err != nil {
+				return nil, fmt.Errorf("%w: 读取 git diff 失败: %w", ErrInvalidInput, err)
+			}
 		}
 	}
 
