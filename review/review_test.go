@@ -949,3 +949,24 @@ func TestRedactToken(t *testing.T) {
 		t.Errorf("应有 *** 占位: %q", out)
 	}
 }
+
+// TestCanonicalizeRepoURL 仓库链接规范化（R：github.com/github.com 双前缀 bug 回归）。
+func TestCanonicalizeRepoURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/o/r":                 "https://github.com/o/r",
+		"github.com/o/r":                         "https://github.com/o/r",
+		"github.com/o/r.git":                     "https://github.com/o/r",
+		"o/r":                                    "https://github.com/o/r",
+		"/var/folders/x/remote.git":              "/var/folders/x/remote.git", // 本地路径透传
+		"https://github.com/octocat/Hello-World": "https://github.com/octocat/Hello-World",
+	}
+	for in, want := range cases {
+		if got := canonicalizeRepoURL(in); got != want {
+			t.Errorf("canonicalizeRepoURL(%q) = %q, 期望 %q", in, got, want)
+		}
+	}
+	// 双前缀回归：输入已含 github.com/ 时不得再拼一次
+	if got := canonicalizeRepoURL("https://github.com/github.com/octocat/Hello-World"); strings.Contains(got, "github.com/github.com") {
+		t.Errorf("双前缀回归: %q", got)
+	}
+}
