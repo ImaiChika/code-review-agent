@@ -844,7 +844,7 @@ func TestRun_RepoURL_CloneAndReview(t *testing.T) {
 	// 源仓库（普通）→ 推到 bare remote（模拟远端）
 	src := filepath.Join(base, "src")
 	os.MkdirAll(src, 0755)
-	run("init", "-q", src)
+	run("init", "-q", "-b", "main", src) // 显式分支名：CI 上 git 默认 master 会让 push HEAD:main 与 remote HEAD 错位
 	run("-C", src, "config", "user.email", "t@t.co")
 	run("-C", src, "config", "user.name", "t")
 	if err := os.WriteFile(filepath.Join(src, "go.mod"), []byte("module repourl\n\ngo 1.21\n"), 0644); err != nil {
