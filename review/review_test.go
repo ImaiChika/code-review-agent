@@ -730,3 +730,103 @@ func TestRun_RepoTypes_FailOpen(t *testing.T) {
 		t.Error("类型未知时词法行为应保持（ghost.Do 的 _ 丢弃按旧语义上报）")
 	}
 }
+
+// TestRun_RepoIncrementalDiff D7 集成：同仓库两轮审查的增量对比——
+// 第二轮相对第一轮：新增/复发/已消失 各就各位。
+func TestRun_RepoIncrementalDiff(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v 失败: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", dir)
+	run("-C", dir, "config", "user.email", "t@t.co")
+	run("-C", dir, "config", "user.name", "t")
+
+	dbPath := filepath.Join(t.TempDir(), "review.db")
+	outDir := t.TempDir()
+
+	// ── 第一轮：两个问题（硬编码密码 + 忽略错误）──
+	v1 := `package app
+
+func auth() string {
+	password := "hunter2-v1"
+	return password
+}
+
+func write() {
+	_, _ = writeAll(nil, nil)
+}
+`
+	// writeAll 未定义会类型检查失败——D3 类型加载 fail-open，词法行为保留，无妨
+	if err := os.WriteFile(filepath.Join(dir, "app.go"), []byte(v1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module inc\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// 基线只提交 go.mod；app.go 用 intent-to-add（git diff 可见未提交新增行）
+	run("-C", dir, "add", "go.mod")
+	run("-C", dir, "commit", "-qm", "base")
+	run("-C", dir, "add", "-N", "app.go")
+	rep1, err := Run(Options{RepoPath: dir, DBPath: dbPath, OutputDir: outDir, SandboxMode: SandboxOff})
+	if err != nil {
+		t.Fatalf("第一轮失败: %v", err)
+	}
+	if rep1.Incremental != nil {
+		t.Fatal("第一轮不应有增量对比（没有上一次）")
+	}
+
+	// ── 第二轮：修复密码（已消失）、保留忽略错误（复发）、新增 SQL 拼接（新增）──
+	v2 := `package app
+
+func auth() string {
+	return "from-config"
+}
+
+func write() {
+	_, _ = writeAll(nil, nil)
+}
+
+func query(name string) string {
+	return "SELECT * FROM users WHERE name = '" + name + "'"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.go"), []byte(v2), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep2, err := Run(Options{RepoPath: dir, DBPath: dbPath, OutputDir: outDir, SandboxMode: SandboxOff})
+	if err != nil {
+		t.Fatalf("第二轮失败: %v", err)
+	}
+	inc := rep2.Incremental
+	if inc == nil {
+		t.Fatal("第二轮应有增量对比")
+	}
+	if inc.BaseTaskID != rep1.TaskID {
+		t.Errorf("对比基准应为第一轮任务 %s, got %s", rep1.TaskID, inc.BaseTaskID)
+	}
+	has := func(list []report.FindingRef, rule string) bool {
+		for _, f := range list {
+			if f.RuleID == rule {
+				return true
+			}
+		}
+		return false
+	}
+	// 新增：SQL 拼接（第二轮新写法）
+	if !has(inc.NewFindings, "SEC-AST-003") {
+		t.Errorf("SEC-AST-003 应为新增: %+v", inc.NewFindings)
+	}
+	// 已消失：第一轮的硬编码密码（SEC-AST-001）被修复
+	if !has(inc.GoneFindings, "SEC-AST-001") {
+		t.Errorf("SEC-AST-001 应为已消失: %+v", inc.GoneFindings)
+	}
+	// 复发：writeAll 的忽略错误两轮都有
+	if !has(inc.RecurFindings, "ERR-AST-001") {
+		t.Errorf("ERR-AST-001 应为复发: 新增%+v 复发%+v", inc.NewFindings, inc.RecurFindings)
+	}
+}

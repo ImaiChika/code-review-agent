@@ -58,6 +58,9 @@ type Store interface {
 	GetFindingStats() (*FindingStats, error)
 	GetTrendStats() (*TrendStats, error)
 
+	// 增量对比（D7）
+	FindPreviousTask(inputPath, excludeTaskID string) (*ReviewTask, error)
+
 	// 误报标记（M8-C9：记忆降噪）
 	SaveFalsePositiveMark(mark *FalsePositiveMark) error
 	ListFalsePositiveMarks() ([]*FalsePositiveMark, error)
@@ -377,6 +380,52 @@ func (s *SQLiteStore) migrateColumns() error {
 		}
 	}
 	return nil
+}
+
+// FindPreviousTask 查找同输入的上一个已完成审查任务（D7 增量对比用）。
+// excludeTaskID：当前任务（对比基准不能是自己）。
+func (s *SQLiteStore) FindPreviousTask(inputPath, excludeTaskID string) (*ReviewTask, error) {
+	row := s.db.QueryRow(
+		`SELECT task_id, status, task_name, input_type, input_path, files_count, go_files_count,
+		        started_at, completed_at, duration, error_msg, risk_score, risk_grade
+		 FROM cr_review_tasks
+		 WHERE input_path = ? AND task_id != ? AND status = 'completed'
+		 ORDER BY started_at DESC LIMIT 1`, inputPath, excludeTaskID,
+	)
+	var task ReviewTask
+	var completedAt sql.NullTime
+	var taskName, duration, errorMsg, riskGrade sql.NullString
+	var riskScore sql.NullFloat64
+	err := row.Scan(
+		&task.TaskID, &task.Status, &taskName, &task.InputType, &task.InputPath,
+		&task.FilesCount, &task.GoFilesCount,
+		&task.StartedAt, &completedAt, &duration, &errorMsg, &riskScore, &riskGrade,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if taskName.Valid {
+		task.TaskName = taskName.String
+	}
+	if completedAt.Valid {
+		task.CompletedAt = &completedAt.Time
+	}
+	if duration.Valid {
+		task.Duration = duration.String
+	}
+	if errorMsg.Valid {
+		task.ErrorMsg = errorMsg.String
+	}
+	if riskScore.Valid {
+		task.RiskScore = riskScore.Float64
+	}
+	if riskGrade.Valid {
+		task.RiskGrade = riskGrade.String
+	}
+	return &task, nil
 }
 
 // Close 关闭存储连接。

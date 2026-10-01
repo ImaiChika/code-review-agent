@@ -118,6 +118,10 @@ func runCLI(args []string) {
 	if rep.SandboxSummary.TotalRuns > 0 {
 		fmt.Printf("   沙箱执行: %d 次, 耗时 %s\n", rep.SandboxSummary.TotalRuns, rep.SandboxSummary.TotalDuration)
 	}
+	if inc := rep.Incremental; inc != nil {
+		fmt.Printf("   增量对比（对比 %s）: 新增 %d · 复发 %d · 已消失 %d\n",
+			inc.BaseTaskID, len(inc.NewFindings), len(inc.RecurFindings), len(inc.GoneFindings))
+	}
 	if rep.Monitor.PermissionDenied > 0 {
 		fmt.Printf("   权限拦截: %d 次\n", rep.Monitor.PermissionDenied)
 	}

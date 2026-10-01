@@ -553,6 +553,21 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			return nil, fmt.Errorf("保存 findings 失败: %w", err)
 		}
 
+		// D7：repo 模式增量对比——对比上一次同输入的已完成审查，
+		// 标出新增/复发/已消失。信息性功能，不改变检出结果。
+		if opts.RepoPath != "" {
+			if prev, perr := store.FindPreviousTask(inputPath, taskID); perr == nil && prev != nil {
+				if prevFs, ferr := store.GetFindings(prev.TaskID); ferr == nil {
+					reviewReport.Incremental = buildIncrementalDiff(prev.TaskID, dedupResult.Findings, prevFs)
+					if opts.Verbose {
+						inc := reviewReport.Incremental
+						fmt.Printf("📊 增量对比（对比 %s）: 新增 %d · 复发 %d · 已消失 %d\n",
+							inc.BaseTaskID, len(inc.NewFindings), len(inc.RecurFindings), len(inc.GoneFindings))
+					}
+				}
+			}
+		}
+
 		// 保存沙箱执行记录
 		for _, run := range counters.sandboxRuns {
 			if err := store.SaveSandboxRun(&run); err != nil {
@@ -858,4 +873,42 @@ func ResolveAuditPath(auditFlag, outputDir string) string {
 		return filepath.Join(outputDir, auditFlag)
 	}
 	return auditFlag
+}
+
+// buildIncrementalDiff 构造同仓库两次审查的增量对比（D7）。
+// 匹配键：rule_id + file + 归一化 evidence——行号会随代码位移漂移，
+// 而同一处问题的证据文本（已脱敏）在两轮间一致；行号只作展示。
+func buildIncrementalDiff(baseTaskID string, current, previous []findings.Finding) *report.IncrementalDiff {
+	key := func(f findings.Finding) string {
+		return f.RuleID + "|" + f.File + "|" + strings.TrimSpace(f.Evidence)
+	}
+	prevSet := map[string]findings.Finding{}
+	for _, f := range previous {
+		prevSet[key(f)] = f
+	}
+	curSet := map[string]bool{}
+
+	ref := func(f findings.Finding) report.FindingRef {
+		return report.FindingRef{
+			RuleID: f.RuleID, File: f.File, Line: f.Line,
+			Severity: string(f.Severity), Title: f.Title,
+		}
+	}
+
+	inc := &report.IncrementalDiff{BaseTaskID: baseTaskID}
+	for _, f := range current {
+		k := key(f)
+		curSet[k] = true
+		if _, ok := prevSet[k]; ok {
+			inc.RecurFindings = append(inc.RecurFindings, ref(f)) // 复发（上次也有）
+		} else {
+			inc.NewFindings = append(inc.NewFindings, ref(f)) // 本次新增
+		}
+	}
+	for _, f := range previous {
+		if !curSet[key(f)] {
+			inc.GoneFindings = append(inc.GoneFindings, ref(f)) // 已消失（已修复或代码移除）
+		}
+	}
+	return inc
 }

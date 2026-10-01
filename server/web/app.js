@@ -735,6 +735,20 @@ async function viewTasks() {
   log(`任务列表就绪 — ${data.count} 条`);
 }
 
+
+/* 增量对比分组（D7）：标题行 + 问题引用行 */
+function incGroupHTML(label, color, list) {
+  const n = (list || []).length;
+  if (!n) return `<div style="margin-bottom:10px"><b style="color:${color}">${label} 0</b></div>`;
+  const items = list.map(f => `
+    <div style="display:flex;gap:8px;align-items:baseline;padding:3px 0">
+      <span>${badge(f.severity)}</span>
+      <span class="mono" style="font-size:12px">${esc(f.file)}:${f.line}</span>
+      <span class="dim" style="font-size:12px">${esc(f.title)}</span>
+    </div>`).join("");
+  return `<div style="margin-bottom:12px"><b style="color:${color}">${label} ${n}</b>${items}</div>`;
+}
+
 /* ══════════════ 视图 04：任务详情 ══════════════ */
 let taskSevFilter = "all";
 
@@ -797,6 +811,13 @@ async function viewTask(taskID) {
 
     ${panel("风险判定", gaugeHTML(m.risk_score, m.risk_grade),
       "评分 0-100，越高越危险；等级 A(0-20) B(20-40) C(40-60) D(60-80) F(80-100)")}
+
+    ${rep.incremental ? `<div style="height:14px"></div>
+    ${panel(`增量对比 · 对比 ${esc(rep.incremental.base_task_id)}`,
+      incGroupHTML("新增", "var(--red)", rep.incremental.new_findings) +
+      incGroupHTML("复发", "var(--orange)", rep.incremental.recurred_findings) +
+      incGroupHTML("已消失", "var(--green)", rep.incremental.gone_findings),
+      "与同仓库上一次审查的对比：新增=这次才出现；复发=上次也有；已消失=上次有这次没有（已修复或代码移除）")}` : ""}
 
     <div style="height:14px"></div>
 

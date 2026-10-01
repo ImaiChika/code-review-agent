@@ -19,6 +19,23 @@ import (
 )
 
 // ReviewReport 表示一次完整的代码审查报告。
+type FindingRef struct {
+	RuleID   string `json:"rule_id"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+}
+
+// IncrementalDiff 同仓库两次审查的增量对比（D7）。
+type IncrementalDiff struct {
+	BaseTaskID    string       `json:"base_task_id"`
+	NewFindings   []FindingRef `json:"new_findings"`      // 本次新增
+	RecurFindings []FindingRef `json:"recurred_findings"` // 复发（上次也有）
+	GoneFindings  []FindingRef `json:"gone_findings"`     // 已消失（上次有本次没有）
+}
+
+// ReviewReport 表示一次完整的代码审查报告。
 type ReviewReport struct {
 	// 基本信息
 	TaskID    string `json:"task_id"`             // 审查任务 ID
@@ -40,6 +57,9 @@ type ReviewReport struct {
 
 	// 治理拦截摘要
 	Governance GovernanceSummary `json:"governance"`
+
+	// 增量对比（D7：repo 模式对比上一次同输入审查）
+	Incremental *IncrementalDiff `json:"incremental,omitempty"`
 
 	// Skill 元数据（M1-B1：框架 skill.NewFSRepository 加载结果）
 	Skill *SkillInfo `json:"skill,omitempty"`
