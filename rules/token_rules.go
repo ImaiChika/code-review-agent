@@ -411,7 +411,8 @@ func isClosureGoroutine(goLine string) bool {
 
 // TokenResourceRule 使用词法分析检测资源泄漏。
 type TokenResourceRule struct {
-	analyzer *analyzer.TokenAnalyzer
+	repoTypes *analyzer.RepoTypes // D3：repo 模式类型信息（nil = 非 repo 模式）
+	analyzer  *analyzer.TokenAnalyzer
 }
 
 // NewTokenResourceRule 创建 Token 感知的资源泄漏检测规则实例。
@@ -439,6 +440,9 @@ var resourceOpenCalls = map[string]string{
 	"net.Dial(":      ".Close()",
 	"net.Listen(":    ".Close()",
 }
+
+// SetRepoTypes 注入 repo 模式类型信息（D3 TypeAware）。
+func (r *TokenResourceRule) SetRepoTypes(rt *analyzer.RepoTypes) { r.repoTypes = rt }
 
 func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
@@ -480,6 +484,13 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 						closed = hasCloseInLines(fileLines, handleVar+closeMethod)
 					} else {
 						closed = hasCloseInLines(fileLines, closeMethod)
+					}
+					// D3：类型信息已知时按 io.Closer 判定——首返回值不实现
+					// io.Closer 的调用（如 sql.Row）不再依赖手工清单
+					if !closed && r.repoTypes != nil && handleVar != "" {
+						if impl, known := r.repoTypes.FirstLHSImplementsCloser(fd.NewPath, addedLineNums[i]); known && !impl {
+							break
+						}
 					}
 					if !closed &&
 						!ownershipTransferredByReturn(fileLines, handleVar) {
@@ -562,7 +573,8 @@ func extractVarNameToken(line string) string {
 //  3. log.Fatal 使用：找到标识符 log + 点 + Fatal
 //  4. 错误被吞没：if err != nil 块中只有 return nil
 type TokenErrorRule struct {
-	analyzer *analyzer.TokenAnalyzer
+	repoTypes *analyzer.RepoTypes // D3：repo 模式类型信息（nil = 非 repo 模式）
+	analyzer  *analyzer.TokenAnalyzer
 }
 
 // NewTokenErrorRule 创建 Token 感知的错误处理检测规则实例。
@@ -574,6 +586,9 @@ func (r *TokenErrorRule) ID() string                  { return "ERR-AST-001" }
 func (r *TokenErrorRule) Name() string                { return "Token 感知的错误处理检测" }
 func (r *TokenErrorRule) Severity() findings.Severity { return findings.SeverityMedium }
 func (r *TokenErrorRule) Category() findings.Category { return findings.CategoryErrorHandling }
+
+// SetRepoTypes 注入 repo 模式类型信息（D3 TypeAware）。
+func (r *TokenErrorRule) SetRepoTypes(rt *analyzer.RepoTypes) { r.repoTypes = rt }
 
 func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
@@ -601,6 +616,38 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 			analysis := r.analyzer.AnalyzeLine(content, line.NewLine)
 
 			// 检查 1：用 _ 忽略错误
+			// D3：repo 模式下用类型信息判定——每个 _ 位置的返回值类型都已知
+			// 且都不是 error 时，本次丢弃与错误无关（三返回值首丢弃等误报根治）
+			if r.repoTypes != nil {
+				lhs := content
+				if i := strings.Index(content, ":="); i >= 0 {
+					lhs = content[:i]
+				} else if i := strings.Index(content, "="); i >= 0 {
+					lhs = content[:i]
+				}
+				parts := strings.Split(strings.TrimSpace(lhs), ",")
+				if hasUnderscoreParts(parts) {
+					knownNonError, anyError := 0, 0
+					for idx, p := range parts {
+						if strings.TrimSpace(p) != "_" {
+							continue
+						}
+						t := r.repoTypes.LHSPositionType(fd.NewPath, line.NewLine, idx)
+						switch {
+						case t == nil:
+							// 未知 → 不下结论，保持词法行为
+							knownNonError, anyError = 0, 1
+						case analyzer.IsErrorType(t):
+							anyError = 1
+						default:
+							knownNonError++
+						}
+					}
+					if anyError == 0 && knownNonError > 0 {
+						continue // 所有 _ 位置类型已知且非 error → 与错误无关
+					}
+				}
+			}
 			if isIgnoredErrorToken(analysis, content) {
 				f := findings.NewFinding(
 					r.Severity(), r.Category(), r.ID(),
@@ -1187,4 +1234,14 @@ func bearerLeakToken(s string) string {
 		}
 	}
 	return token
+}
+
+// hasUnderscoreParts 判断赋值左侧是否存在 _ 占位。
+func hasUnderscoreParts(parts []string) bool {
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "_" {
+			return true
+		}
+	}
+	return false
 }

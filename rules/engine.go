@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 
+	"code-review-agent/analyzer"
 	"code-review-agent/diff"
 	"code-review-agent/findings"
 )
@@ -33,6 +34,21 @@ func NewEngine() *RuleEngine {
 //	engine.Register(&GoroutineLeakRule{})
 func (e *RuleEngine) Register(rule Rule) {
 	e.rules = append(e.rules, rule)
+}
+
+// TypeAware 支持 repo 模式类型信息注入的规则（D3：RES/ERR 从"猜"变"知道"）。
+type TypeAware interface {
+	SetRepoTypes(*analyzer.RepoTypes)
+}
+
+// SetRepoTypes 把 repo 模式类型信息注入所有支持 TypeAware 的规则。
+// 非 repo 模式传 nil——规则退回词法行为。
+func (e *RuleEngine) SetRepoTypes(rt *analyzer.RepoTypes) {
+	for _, r := range e.rules {
+		if ta, ok := r.(TypeAware); ok {
+			ta.SetRepoTypes(rt)
+		}
+	}
 }
 
 // RegisterAll 批量注册规则。

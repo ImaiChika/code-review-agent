@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"code-review-agent/analyzer"
 	"code-review-agent/diff"
 	"code-review-agent/findings"
 	"code-review-agent/llmreview"
@@ -286,6 +287,22 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		engine.RegisterAll(dslRules...)
 		if opts.Verbose {
 			fmt.Printf("📋 加载了 %d 条 YAML 自定义规则\n", len(dslRules))
+		}
+	}
+
+	// D3：repo 模式加载类型信息（go/types，fail-open）——ERR/RES 规则"从猜变知道"
+	if opts.RepoPath != "" {
+		rels := make([]string, 0, len(files))
+		for _, f := range files {
+			rels = append(rels, f.NewPath)
+		}
+		if rt := analyzer.LoadRepoTypes(opts.RepoPath, rels); rt != nil {
+			engine.SetRepoTypes(rt)
+			if opts.Verbose {
+				fmt.Printf("🧬 类型信息: 已加载 %d 个变更文件的包类型（go/types）\n", len(rels))
+			}
+		} else if opts.Verbose {
+			fmt.Println("🧬 类型信息: 不可用（非 Go module 或解析失败），规则退回词法行为")
 		}
 	}
 

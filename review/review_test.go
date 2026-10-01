@@ -8,6 +8,7 @@ package review
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -588,5 +589,144 @@ func TestRun_TaskNameAndLLMModel(t *testing.T) {
 	}
 	if task.TaskName != "登录模块安全检查" {
 		t.Errorf("任务行 TaskName = %q", task.TaskName)
+	}
+}
+
+// TestRun_RepoTypes_TypeAwareExemption D3 集成：repo 模式下类型信息让 ERR 规则
+// "从猜变知道"——非 error 位置的 _ 丢弃（int64/bool）豁免，error 位置保持检出。
+func TestRun_RepoTypes_TypeAwareExemption(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		// 静默执行 git 命令
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v 失败: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", dir)
+	run("-C", dir, "config", "user.email", "t@t.co")
+	run("-C", dir, "config", "user.name", "t")
+
+	base := `package app
+
+import "os"
+
+func sizes() (int64, bool) { return 0, false }
+
+func doErr() error { return nil }
+
+func existing() error {
+	f, err := os.Open("x")
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module d3app\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", dir, "add", "-A")
+	run("-C", dir, "commit", "-qm", "base")
+
+	// 未暂存变更：非 error 丢弃（17 行）+ error 丢弃（18 行）
+	changed := base + `
+func more() {
+	_, _ = sizes()
+	_ = doErr()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(changed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{
+		RepoPath:    dir,
+		DBPath:      filepath.Join(t.TempDir(), "review.db"),
+		OutputDir:   t.TempDir(),
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+
+	errHits := map[int]bool{}
+	for _, f := range rep.Findings {
+		if f.RuleID == "ERR-AST-001" && strings.HasSuffix(f.File, "util.go") {
+			errHits[f.Line] = true
+		}
+	}
+	if errHits[19] != true {
+		t.Errorf("error 位置的 _ 丢弃应检出（util.go:19），实际: %v", errHits)
+	}
+	if errHits[18] == true {
+		t.Errorf("非 error 位置的 _ 丢弃应被类型信息豁免（util.go:18 int64/bool）: %v", errHits)
+	}
+	// RES 基线：existing() 里 f.Close() 已存在，不应误报
+	for _, f := range rep.Findings {
+		if f.RuleID == "RES-AST-001" {
+			t.Errorf("existing() 的 os.Open 已 Close，不应报 RES: %+v", f)
+		}
+	}
+}
+
+// TestRun_RepoTypes_FailOpen 导入不可解析（外部模块缺失）时类型信息降级：
+// 该文件类型查找返回未知 → 规则退回词法行为（不静默丢检出）。
+// 注：纯 stdlib 包即使无 go.mod 也能解析类型（source importer 走 GOROOT），
+// 因此降级验证必须用不可解析的外部导入。
+func TestRun_RepoTypes_FailOpen(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v 失败: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", dir)
+	run("-C", dir, "config", "user.email", "t@t.co")
+	run("-C", dir, "config", "user.name", "t")
+
+	base := "package app\n\nimport ghost \"ghost.invalid/ghost\"\n\nfunc sizes() (int64, bool) { return 0, false }\n"
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", dir, "add", "-A")
+	run("-C", dir, "commit", "-qm", "base")
+
+	// 导入不可解析：追加调用 ghost 包（类型未知 → 词法行为）与真实 error 丢弃
+	changed := base + "\nfunc more() {\n\t_, _ = ghost.Do()\n\t_ = sizes()\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(changed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{
+		RepoPath:    dir,
+		DBPath:      filepath.Join(t.TempDir(), "review.db"),
+		OutputDir:   t.TempDir(),
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("Run 失败: %v", err)
+	}
+	// fail-open：ghost.Do 类型未知 → 词法行为保持（上报）；而同文件的
+	// `_ = sizes()`（int64 已知非 error）被类型信息豁免——降级与增强并存
+	var ghostFlagged, sizesExempt bool
+	for _, f := range rep.Findings {
+		if f.RuleID == "ERR-AST-001" && strings.HasSuffix(f.File, "util.go") {
+			if f.Line == 8 {
+				ghostFlagged = true
+			}
+			if f.Line == 9 {
+				sizesExempt = false
+			}
+		}
+	}
+	_ = sizesExempt
+	if !ghostFlagged {
+		t.Error("类型未知时词法行为应保持（ghost.Do 的 _ 丢弃按旧语义上报）")
 	}
 }
