@@ -895,7 +895,13 @@ func buildIncrementalDiff(baseTaskID string, current, previous []findings.Findin
 		}
 	}
 
-	inc := &report.IncrementalDiff{BaseTaskID: baseTaskID}
+	// 空分组也序列化为 []（前端与 API 消费方不必判 null）
+	inc := &report.IncrementalDiff{
+		BaseTaskID:    baseTaskID,
+		NewFindings:   []report.FindingRef{},
+		RecurFindings: []report.FindingRef{},
+		GoneFindings:  []report.FindingRef{},
+	}
 	for _, f := range current {
 		k := key(f)
 		curSet[k] = true
