@@ -50,8 +50,8 @@ import (
 var webFS embed.FS
 
 // Version 服务版本号。单一来源：/api/health、前端侧栏与 MCP serverInfo 均读它。
-// 发版时随 tag 同步（v1.1.0 后进入 M8 开发，故为 1.2.0-dev）。
-const Version = "1.2.0-dev"
+// 发版时随 tag 同步（v1.2.0：M8 智能化增强发布）。
+const Version = "1.2.0"
 
 // Config 服务配置。
 type Config struct {
