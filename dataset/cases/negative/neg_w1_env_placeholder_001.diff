@@ -1,0 +1,9 @@
+--- a/.env.example
++++ b/.env.example
+@@ -1,2 +1,5 @@
+ APP_PORT=8080
++DATABASE_URL=${DATABASE_URL}
++SMTP_PASSWORD=<your-password-here>
++SESSION_SECRET=changeme
++SHORT=abc
++FALLBACK_DB=postgres://db.internal:5432/prod

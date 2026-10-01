@@ -81,6 +81,8 @@ func newEvalEngine() *rules.RuleEngine {
 	engine.Register(rules.NewTokenMutexRule())            // R2：CON-AST-001
 	engine.Register(rules.NewTokenLoopTimerRule())        // R2：RES-AST-002
 	engine.Register(rules.NewTokenRowsErrRule())          // R2：DB-AST-002
+	engine.Register(rules.NewGeneralSecretRule())         // W1：SEC-GEN-001
+	engine.Register(rules.NewGeneralLargeDeleteRule())    // W1：DEL-GEN-001
 	return engine
 }
 

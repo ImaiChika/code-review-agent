@@ -1,0 +1,11 @@
+{
+  "id": "w1_large_delete_001",
+  "description": "W1：单文件删除 35 行（GEN-002 大段删除确认提示，走 warnings 通道）",
+  "category": "quality",
+  "difficulty": "easy",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "DEL-GEN-001", "file": "legacy.js", "line": 4}
+  ],
+  "sensitive_literals": []
+}

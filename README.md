@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **Token 感知的规则引擎**：基于 `go/scanner` 词法分析，不是简单正则匹配
-- **15 条内置规则**：硬编码密钥、敏感信息泄漏（含 GitHub/GitLab/Google/npm/SendGrid/Bearer 前缀）、goroutine 泄漏、context 取消泄漏、资源泄漏、SQL 拼接注入、命令注入、错误处理、测试缺失、DB 事务生命周期
+- **17 条内置规则**（含 W1 全语言兜底：非 Go 文本文件的密钥/凭据与大段删除检测）：硬编码密钥、敏感信息泄漏（含 GitHub/GitLab/Google/npm/SendGrid/Bearer 前缀）、goroutine 泄漏、context 取消泄漏、资源泄漏、SQL 拼接注入、命令注入、错误处理、测试缺失、DB 事务生命周期
 - **YAML 规则 DSL**：用户可用 YAML 自定义规则，不需要写 Go 代码
 - **风险评分系统**：0-100 分量化评分，带多维度 breakdown
 - **SQLite 存储**：审查结果持久化，支持按任务查询
@@ -151,6 +151,8 @@ code-review-agent/
 | CON-AST-001 | mutex 配对（R2） | Lock() 后无 Unlock()（RLock 单独配对） |
 | RES-AST-002 | 循环 defer 与 timer 泄漏（R2） | defer 在 for 循环内；time.Tick；NewTimer/Ticker 无 Stop |
 | DB-AST-002 | rows.Err 检查（R2） | rows 迭代后未检查 rows.Err() |
+| SEC-GEN-001 | 无引号敏感凭据（W1） | 非 Go 文本文件（.env/YAML/properties 等）key 含敏感词的无引号值、URL 内嵌凭据；占位符/引用/名字后缀豁免 |
+| DEL-GEN-001 | 大段删除确认（W1） | 单文件删除 ≥30 行（low/warnings，确认性提示） |
 
 ## YAML 自定义规则
 

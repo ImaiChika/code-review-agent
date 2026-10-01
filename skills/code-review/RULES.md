@@ -115,6 +115,19 @@
 - **检测**: `rows, err := ...Query(` 后全部新增行无 `rows.Err()`
 - **豁免**: 已检查 rows.Err()（迭代中途的 IO 错误只能靠它捕获）
 
+### SEC-GEN-001: 通用规则：无引号敏感凭据检测（W1，全语言兜底）
+
+- **严重度/分类**: high / sensitive_leak
+- **适用**: 非 Go 文本文件（.env / YAML / properties / ini 等任意文本）
+- **检测**: key 含敏感词（password/secret/token/api_key/access_key/credential）的无引号赋值（`=` 或 `:`）；值侧 URL 内嵌凭据（scheme://user:pass@）不受 key 名限制
+- **豁免**: `${引用}` / `<占位>` / changeme/your/xxx/过短值；引号包裹的值（交给词法路径避免双报）；_name/_id/_ttl 等描述性后缀键
+
+### DEL-GEN-001: 通用规则：大段删除确认（W1，全语言兜底）
+
+- **严重度/分类**: low(conf 0.6 → warnings 通道) / quality
+- **检测**: 单文件删除行数 ≥ 30
+- **语义**: 确认性提示——重构残留/误删/需同步文档
+
 ## YAML 自定义规则
 
 ### 规则文件格式

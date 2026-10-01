@@ -1,0 +1,41 @@
+--- a/legacy.js
++++ b/legacy.js
+@@ -1,36 +1,2 @@
+ const config = require("./config")
+
+-legacy line 1 scheduled for removal
+-legacy line 2 scheduled for removal
+-legacy line 3 scheduled for removal
+-legacy line 4 scheduled for removal
+-legacy line 5 scheduled for removal
+-legacy line 6 scheduled for removal
+-legacy line 7 scheduled for removal
+-legacy line 8 scheduled for removal
+-legacy line 9 scheduled for removal
+-legacy line 10 scheduled for removal
+-legacy line 11 scheduled for removal
+-legacy line 12 scheduled for removal
+-legacy line 13 scheduled for removal
+-legacy line 14 scheduled for removal
+-legacy line 15 scheduled for removal
+-legacy line 16 scheduled for removal
+-legacy line 17 scheduled for removal
+-legacy line 18 scheduled for removal
+-legacy line 19 scheduled for removal
+-legacy line 20 scheduled for removal
+-legacy line 21 scheduled for removal
+-legacy line 22 scheduled for removal
+-legacy line 23 scheduled for removal
+-legacy line 24 scheduled for removal
+-legacy line 25 scheduled for removal
+-legacy line 26 scheduled for removal
+-legacy line 27 scheduled for removal
+-legacy line 28 scheduled for removal
+-legacy line 29 scheduled for removal
+-legacy line 30 scheduled for removal
+-legacy line 31 scheduled for removal
+-legacy line 32 scheduled for removal
+-legacy line 33 scheduled for removal
+-legacy line 34 scheduled for removal
+-legacy line 35 scheduled for removal
++// legacy module removed

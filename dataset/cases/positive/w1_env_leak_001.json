@@ -1,0 +1,29 @@
+{
+  "id": "w1_env_leak_001",
+  "description": "W1：.env 无引号 KEY=value 凭据（GEN-001；现有 Go 词法规则对无引号形态完全漏检——实测探底）（行号修正：.env 上下文仅 1 行，密钥在 2-4 行）",
+  "category": "sensitive_leak",
+  "difficulty": "medium",
+  "expected_findings": [
+    {
+      "rule_id": "SEC-GEN-001",
+      "file": ".env.production",
+      "line": 2
+    },
+    {
+      "rule_id": "SEC-GEN-001",
+      "file": ".env.production",
+      "line": 3
+    },
+    {
+      "rule_id": "SEC-GEN-001",
+      "file": ".env.production",
+      "line": 4
+    }
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": [
+    "secretpass",
+    "mailpass-2024-prod",
+    "zoom-session-secret-9900"
+  ]
+}

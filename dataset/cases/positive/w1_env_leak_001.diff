@@ -1,0 +1,7 @@
+--- a/.env.production
++++ b/.env.production
+@@ -1,2 +1,4 @@
+ APP_PORT=8080
++DATABASE_URL=postgres://admin:secretpass@db.internal:5432/prod
++SMTP_PASSWORD=mailpass-2024-prod
++SESSION_SECRET=zoom-session-secret-9900

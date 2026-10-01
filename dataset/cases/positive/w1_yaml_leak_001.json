@@ -1,0 +1,22 @@
+{
+  "id": "w1_yaml_leak_001",
+  "description": "W1：YAML 无引号 password/api_key（GEN-001）（行号修正：YAML 3 行上下文，密钥在 4-5 行）",
+  "category": "sensitive_leak",
+  "difficulty": "medium",
+  "expected_findings": [
+    {
+      "rule_id": "SEC-GEN-001",
+      "file": "config.yaml",
+      "line": 4
+    },
+    {
+      "rule_id": "SEC-GEN-001",
+      "file": "config.yaml",
+      "line": 5
+    }
+  ],
+  "expected_warnings": [],
+  "sensitive_literals": [
+    "super-secret-yaml-123"
+  ]
+}

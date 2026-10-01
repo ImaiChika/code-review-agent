@@ -1,0 +1,9 @@
+{
+  "id": "neg_w1_small_delete_001",
+  "description": "W1 陷阱：小删除（5 行，低于阈值），DEL-GEN-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

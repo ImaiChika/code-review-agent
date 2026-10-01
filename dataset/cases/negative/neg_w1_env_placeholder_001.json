@@ -1,0 +1,9 @@
+{
+  "id": "neg_w1_env_placeholder_001",
+  "description": "W1 陷阱：占位符形态（${引用}/<your-…>/changeme/过短值），GEN-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

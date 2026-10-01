@@ -1,0 +1,7 @@
+--- a/app.yaml
++++ b/app.yaml
+@@ -1,2 +1,5 @@
+ name: demo
++replica_count: 3
++token_ttl_seconds: 3600
++secret_name: my-arn-reference
