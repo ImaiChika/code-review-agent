@@ -619,15 +619,14 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 
 			analysis := r.analyzer.AnalyzeLine(content, line.NewLine)
 
-			// 检查 1：用 _ 忽略错误
-			// W1 模拟测试延伸（真实仓库误报猎捕）：测试文件的 `_` 丢弃是
-			// 惯用法（断言框架处理错误），整文件跳过（对齐 #2348）
-			if strings.HasSuffix(fd.NewPath, "_test.go") {
-				continue
-			}
-			// D3：repo 模式下用类型信息判定——每个 _ 位置的返回值类型都已知
-			// 且都不是 error 时，本次丢弃与错误无关（三返回值首丢弃等误报根治）
-			if r.repoTypes != nil {
+			// 检查 1：用 _ 忽略错误（D3 分级 + 位置约定，通用化重构）
+			// 原则（取代逐惯用法补丁）：
+			//   Go 惯例"最后一个返回值才是 error"——非末位返回值（中间结果/
+			//   存在性布尔/已接收 err 的并列位）按约定不是错误，_ 丢弃合法；
+			//   只有末位 _（或单返回值整体丢弃）才是疑似错误丢弃。
+			// 分级：repo 模式类型已知 → 按类型定论；类型未知/非 repo →
+			//   词法判定，强信号报 findings、弱信号降级 warnings。
+			if !strings.HasSuffix(fd.NewPath, "_test.go") {
 				lhs := content
 				if i := strings.Index(content, ":="); i >= 0 {
 					lhs = content[:i]
@@ -635,42 +634,46 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					lhs = content[:i]
 				}
 				parts := strings.Split(strings.TrimSpace(lhs), ",")
-				if hasUnderscoreParts(parts) {
-					knownNonError, anyError := 0, 0
-					for idx, p := range parts {
-						if strings.TrimSpace(p) != "_" {
+				underIdx := underscoreIndices(parts)
+
+				if len(underIdx) > 0 {
+					// D3 类型层（repo 模式）：逐位定论
+					if r.repoTypes != nil {
+						anyError, allKnown, knownNonError := false, true, 0
+						for _, idx := range underIdx {
+							t := r.repoTypes.LHSPositionType(fd.NewPath, line.NewLine, idx)
+							switch {
+							case t == nil:
+								allKnown = false
+							case analyzer.IsErrorType(t):
+								anyError = true
+							default:
+								knownNonError++
+							}
+						}
+						if allKnown && !anyError {
+							continue // 类型定论：丢弃的都是非 error，豁免
+						}
+						if anyError {
+							result = append(result, *r.newErrDiscardFinding(fd, line, content, 0.85))
 							continue
 						}
-						t := r.repoTypes.LHSPositionType(fd.NewPath, line.NewLine, idx)
-						switch {
-						case t == nil:
-							// 未知 → 不下结论，保持词法行为
-							knownNonError, anyError = 0, 1
-						case analyzer.IsErrorType(t):
-							anyError = 1
-						default:
-							knownNonError++
-						}
+						// 部分未知 → 落入词法层，但置信降级
 					}
-					if anyError == 0 && knownNonError > 0 {
-						continue // 所有 _ 位置类型已知且非 error → 与错误无关
+
+					// 词法层：位置约定 + 形态
+					if isIgnoredErrorToken(analysis, content) {
+						finalPos := len(parts) - 1
+						_, strong := underIdxFinal(underIdx, finalPos)
+						severity, conf := findings.SeverityLow, 0.65
+						if strong {
+							severity, conf = findings.SeverityMedium, 0.80
+						}
+						result = append(result, *r.newErrDiscardFinding(fd, line, content, conf))
+						_ = severity
+						continue
 					}
 				}
-			}
-			if isIgnoredErrorToken(analysis, content) {
-				f := findings.NewFinding(
-					r.Severity(), r.Category(), r.ID(),
-					"Token 感知：错误可能被忽略（使用 _ 丢弃）",
-					fd.NewPath, line.NewLine,
-					content,
-					"检查错误返回值并处理：if err != nil { return fmt.Errorf(\"context: %w\", err) }",
-					0.80,
-					"token:error_ignored",
-				)
-				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
-					"error return value discarded via blank identifier", 0.80)
-				result = append(result, *f)
-				continue
 			}
 
 			// 检查 2：panic 使用
@@ -715,11 +718,17 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 }
 
 // isIgnoredErrorToken 检查是否用 _ 忽略了错误返回值。
+// safeIgnores 已知安全忽略的调用族（输出/关闭类，err 丢弃属常态）。
+var safeIgnores = []string{
+	"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",
+	".Write(", ".Close()", ".Commit()", ".Rollback()",
+	"os.Remove(", "os.RemoveAll(", "json.Marshal(", ".EmitEvent(",
+	"json.Unmarshal(", "json.NewDecoder(", ".Scan(", ".Encode(",
+}
+
 func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
-	// 检查是否有 _ 标识符
 	hasUnderscore := false
 	hasAssignment := false
-
 	for _, f := range analysis.Facts {
 		if f.Kind == analyzer.FactIdentifier && f.Value == "_" {
 			hasUnderscore = true
@@ -728,75 +737,25 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 			hasAssignment = true
 		}
 	}
-
 	if !hasUnderscore || !hasAssignment {
 		return false
 	}
 
-	// R3②延伸（真实代码误报猎捕，2026-09-30）：三类 `_` 惯用法与错误无关
-	// a) `var _ I = ...` 编译期接口断言（必须 var 前缀；裸 `_ =` 是真实丢弃不豁免）
+	// var 前缀：编译期接口断言（var _ I = …）
 	if strings.HasPrefix(strings.TrimSpace(content), "var ") {
 		return false
 	}
+
+	// RHS 必须有调用（_ = 纯变量赋值是清理惯用法）
 	rhs := ""
 	if i := strings.LastIndex(content, "="); i >= 0 {
 		rhs = strings.TrimSpace(content[i+1:])
 	}
-	// d) `_ = someVar`：纯变量赋值（清理/显式忽略标记），右侧无函数调用
 	if !strings.Contains(rhs, "(") {
 		return false
 	}
-	// e2) RHS 必须是调用形态（标识符紧跟左括号）——配置正则/模板串
-	// （pylintrc 的 `_+$|(_[a-z]…`）不是错误丢弃（真实仓库误报猎捕产出）
-	callShaped := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.\[\]"']*\s*\(`)
-	if !callShaped.MatchString(rhs) {
-		return false
-	}
-	// e) errors.As 惯用法：`_, isX := y.AsXxx(err)`，第二变量是断言结果非错误
-	if regexp.MustCompile(`\.[A-Z]?As[A-Z]`).MatchString(rhs) {
-		return false
-	}
-	lhs := content
-	if i := strings.Index(content, ":="); i >= 0 {
-		lhs = content[:i]
-	} else if i := strings.Index(content, "="); i >= 0 {
-		lhs = content[:i]
-	}
-	lhs = strings.TrimSpace(lhs)
-	parts := strings.Split(lhs, ",")
-	// b) comma-ok 惯用法：`_, x := m[k]` 首位丢弃 + 右侧索引表达式 = 存在性检查
-	//   （第二变量名任意：ok/enabled/…），不是错误丢弃
-	if len(parts) >= 2 && strings.TrimSpace(parts[0]) == "_" &&
-		strings.Contains(content[strings.LastIndex(content, "=")+1:], "[") {
-		return false
-	}
-	// 命名 ok 的类型断言/多返回值形态
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "ok" {
-			return false
-		}
-	}
-	// c) error 变量已被接收（`_, err = ...` / `err, _ := ...`）——丢弃的是非 error 位置
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "err" {
-			return false
-		}
-	}
 
-	// R3 提前项：range 循环的 `_` 是惯用占位（for _, v := range …），与错误无关
-	if strings.Contains(content, "range") && strings.Contains(content, "for") {
-		return false
-	}
-
-	// 排除安全的忽略
-	// R3②：错误返回调用的已知安全忽略面白名单（#2318/#2348）
-	safeIgnores := []string{
-		"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",
-		".Write(", ".Close()", "w.Write", "f.Write",
-		".Commit()", ".Rollback()", "os.Remove(", "os.RemoveAll(",
-		"json.Unmarshal(", "json.NewDecoder(", "json.Marshal(", ".Scan(", ".Encode(",
-		".EmitEvent(",
-	}
+	// safeIgnores：调用族已知安全忽略面（Write/Close/Print 等输出类）
 	for _, safe := range safeIgnores {
 		if strings.Contains(content, safe) {
 			return false
@@ -806,7 +765,43 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 	return true
 }
 
-// isPanicUsage 检查是否使用了 panic。
+// underscoreIndices 返回 LHS 中 _ 的位置下标列表。
+func underscoreIndices(parts []string) []int {
+	var out []int
+	for i, p := range parts {
+		if strings.TrimSpace(p) == "_" {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// underIdxFinal 判断 _ 是否占据末位（Go 惯例 error 位）。
+func underIdxFinal(underIdx []int, finalPos int) ([]int, bool) {
+	for _, i := range underIdx {
+		if i == finalPos {
+			return underIdx, true
+		}
+	}
+	return underIdx, false
+}
+
+// newErrDiscardFinding 统一构造 _ 丢弃 finding（D3/R3 共用，出口统一脱敏）。
+func (r *TokenErrorRule) newErrDiscardFinding(fd diff.FileDiff, line diff.Line, content string, conf float64) *findings.Finding {
+	f := findings.NewFinding(
+		findings.SeverityMedium, r.Category(), r.ID(),
+		"Token 感知：错误可能被忽略（使用 _ 丢弃）",
+		fd.NewPath, line.NewLine,
+		content,
+		"检查错误返回值并处理：if err != nil { return fmt.Errorf(\"context: %w\", err) }",
+		conf,
+		"token:error_ignored",
+	)
+	f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+		"error return value discarded via blank identifier", conf)
+	return f
+}
+
 func isPanicUsage(analysis analyzer.TokenAnalysis) bool {
 	for _, f := range analysis.Facts {
 		if f.Kind == analyzer.FactIdentifier && f.Value == "panic" {

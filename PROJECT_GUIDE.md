@@ -993,7 +993,7 @@ rules:
 |-----------|---------|------|---------|
 | RES-AST-001（文件行文本里找 Close） | ① 变量名级匹配：`x, err := os.Open(…)` 提取 `x` 精确查 `x.Close()`，而非"文件任意行有 Close 就放过"；② 同词法块限定：cleanup 只看当前行之后、同一块内，hunk 不完整 fail-closed；③ 数据流证明：defer 语义、return/panic/break 出口失效、if/for 分支合流、错误守卫跳过、resp.Body 别名、重赋值失效 | ①② #2240；③ #2318 | R3 先落 ①②（成本可控）；③ 工程量 1500 行级，归 M4 类型增强后再评估 |
 | GOR-AST-001 | 类型级判定：go/types 判定 context 可取消性 + 别名不动点传播；"time.After + select 不算取消保护" | #2318 / #2348 | time.After 细节直接加进排除逻辑；类型级传播随 M4 |
-| ERR-AST-001 | 错误返回调用白名单（Close/Commit/Rollback/os.Remove/json.Unmarshal/io.Copy 等已知安全忽略面）才报 `_ =`，为压误报设计；另有 `if err != nil` 后空处理块检测 | #2318 / #2348 | 白名单替换现有 safeIgnores 硬编码清单 |
+| ERR-AST-001 | **已按通用化原则重构（2026-10-01）**：位置约定取代惯用法清单——Go 惯例末位返回值才是 error，非末位 `_` 按约定豁免（`_, ok :=`/`_, err =`/三返回值首丢弃全部自然覆盖，无需认识具体惯用法）；末位 `_` 报 findings、类型未知降级 warnings；测试文件整体跳过；safeIgnores 收窄为输出/关闭调用族 | #2318 / #2348 | ✅ 位置约定取代白名单（白名单收窄为 Write/Close/Commit 等调用族）|
 | SEC-AST-001 | placeholder 值白名单（your-/example/changeme/xxx…）；`os.Getenv()` / `secretmanager` 行豁免（值来自环境则非硬编码） | #2240 / #2369 | 并入 `isLikelyNotSecret` 与新增行级豁免 |
 | DB-AST-001 | 我们的"Commit 或 Rollback 任一即配对"语义正确（#2369 要求两者兼备反而误报 `defer tx.Rollback()` + 条件 Commit 惯用法）；竞品增量：sqlx 的 `Beginx/Connect` 变体、`sql.Open` 无 Close 独立规则 | #2348 / #2318 | 扩 Begin/BeginTx 关键字表即可 |
 | TST-AST-001 | 覆盖导出方法 `func (r *T) Method`；触发条件从"新增导出函数"扩到"导出行为变更"（含函数体修改） | #2348 / #2318 | `extractExportedFuncName` 支持接收者形态 |
