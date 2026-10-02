@@ -1,0 +1,9 @@
+{
+  "id": "neg_sim_wgdone_001",
+  "description": "模拟测试陷阱：go func 字面量体内的 defer wg.Done() 随 goroutine 退出执行（waybackurls 真实误报产出），RES-AST-002 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

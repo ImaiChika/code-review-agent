@@ -1,0 +1,11 @@
+{
+  "id": "w1_panic_lib_001",
+  "description": "模拟测试：库代码 panic（ksuid 真实形态）降级 warnings 通道——低置信可见不占风险分（模拟测试后降级落地）",
+  "category": "error_handling",
+  "difficulty": "easy",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "ERR-AST-001", "file": "ksuid.go", "line": 4}
+  ],
+  "sensitive_literals": []
+}

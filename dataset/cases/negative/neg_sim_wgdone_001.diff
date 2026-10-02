@@ -1,0 +1,14 @@
+--- a/fetch.go
++++ b/fetch.go
+@@ -1,3 +1,10 @@
+ package fetch
+ 
+-func old() {}
++func fetchAll(fns []fn) {
++	for _, fn := range fns {
++		go func() {
++			defer wg.Done()
++			use(fn)
++		}()
++	}
++}

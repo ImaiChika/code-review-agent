@@ -1,0 +1,9 @@
+{
+  "id": "neg_sim_regex_config_001",
+  "description": "模拟测试陷阱：pylintrc 正则配置行（_+$|(_[a-z]… 形态非错误丢弃），ERR-AST-001 不得上报（learn-python 真实误报产出）",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

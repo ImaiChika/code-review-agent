@@ -1,0 +1,11 @@
+--- a/ksuid.go
++++ b/ksuid.go
+@@ -1,2 +1,6 @@
+ package ksuid
+
++func gen() KSUID {
++	if err != nil {
++		panic(fmt.Sprintf("Couldn't generate KSUID, inconceivable! %v", err))
++	}
++	return Nil
++}

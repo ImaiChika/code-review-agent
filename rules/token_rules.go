@@ -620,6 +620,11 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 			analysis := r.analyzer.AnalyzeLine(content, line.NewLine)
 
 			// 检查 1：用 _ 忽略错误
+			// W1 模拟测试延伸（真实仓库误报猎捕）：测试文件的 `_` 丢弃是
+			// 惯用法（断言框架处理错误），整文件跳过（对齐 #2348）
+			if strings.HasSuffix(fd.NewPath, "_test.go") {
+				continue
+			}
 			// D3：repo 模式下用类型信息判定——每个 _ 位置的返回值类型都已知
 			// 且都不是 error 时，本次丢弃与错误无关（三返回值首丢弃等误报根治）
 			if r.repoTypes != nil {
@@ -670,17 +675,19 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 
 			// 检查 2：panic 使用
 			if isPanicUsage(analysis) && !isTestFile(fd.NewPath) {
+				// W1 模拟测试延伸：库代码 panic 是设计决策（如 ksuid 对
+				// crypto/rand 失败的防御）——降级 warnings 通道减少误报噪音
 				f := findings.NewFinding(
-					r.Severity(), r.Category(), r.ID(),
+					findings.SeverityLow, r.Category(), r.ID(),
 					"Token 感知：使用 panic 代替返回 error",
 					fd.NewPath, line.NewLine,
 					content,
 					"库代码应返回 error 而不是 panic",
-					0.85,
+					0.65,
 					"token:panic_usage",
 				)
 				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
-					"panic in non-test library code", 0.85)
+					"panic in non-test library code", 0.65)
 				result = append(result, *f)
 				continue
 			}
@@ -737,6 +744,12 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 	}
 	// d) `_ = someVar`：纯变量赋值（清理/显式忽略标记），右侧无函数调用
 	if !strings.Contains(rhs, "(") {
+		return false
+	}
+	// e2) RHS 必须是调用形态（标识符紧跟左括号）——配置正则/模板串
+	// （pylintrc 的 `_+$|(_[a-z]…`）不是错误丢弃（真实仓库误报猎捕产出）
+	callShaped := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.\[\]"']*\s*\(`)
+	if !callShaped.MatchString(rhs) {
 		return false
 	}
 	// e) errors.As 惯用法：`_, isX := y.AsXxx(err)`，第二变量是断言结果非错误

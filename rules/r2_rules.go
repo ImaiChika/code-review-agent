@@ -243,18 +243,36 @@ func (r *TokenLoopTimerRule) Check(fd diff.FileDiff) ([]findings.Finding, error)
 	var result []findings.Finding
 	added := collectAddedLines(fd)
 
-	// (a) defer 在 for 循环体内：花括号深度跟踪
+	// (a) defer 在 for 循环体内：花括号深度跟踪。
+	// goroutine 字面量（go func() { … defer x.Done() … }）内的 defer 随
+	// goroutine 退出执行，属正确用法——waybackurls 真实误报产出，跳过。
 	depth := 0
 	loopDepth := -1
+	goroutineDepth := -1
 	for _, line := range added {
 		content := line.Content
 		trimmed := strings.TrimSpace(content)
 		if !isCommentLine(content) && loopDepth < 0 && strings.HasPrefix(trimmed, "for") && strings.Contains(content, "{") {
 			loopDepth = depth // for 行自身的 { 会在下面 +1
 		}
+		if !isCommentLine(content) && goroutineDepth < 0 &&
+			(strings.HasPrefix(trimmed, "go ") || trimmed == "go") && strings.Contains(content, "{") {
+			goroutineDepth = depth
+		}
 		opens := strings.Count(content, "{")
 		closes := strings.Count(content, "}")
 		if loopDepth >= 0 && depth > loopDepth && strings.Contains(trimmed, "defer") && !isCommentLine(content) {
+			if goroutineDepth >= 0 && depth > goroutineDepth {
+				// defer 在 go func 字面量体内：随 goroutine 退出执行，正确用法
+				depth += opens - closes
+				if closes > 0 && depth <= goroutineDepth {
+					goroutineDepth = -1
+				}
+				if depth < 0 {
+					depth = 0
+				}
+				continue
+			}
 			f := findings.NewFinding(
 				r.Severity(), r.Category(), r.ID(),
 				"Token 感知：defer 在 for 循环内（函数退出才执行）",

@@ -1,13 +1,26 @@
 {
   "id": "err_ignore_panic_001",
-  "description": "用 _ 丢弃错误返回值（两处）+ 库代码使用 panic",
+  "description": "用 _ 丢弃错误返回值（两处）+ 库代码使用 panic；模拟测试后 panic 检查降级 warnings 通道，期望随动",
   "category": "error_handling",
   "difficulty": "easy",
   "expected_findings": [
-    {"rule_id": "ERR-AST-001", "file": "util.go", "line": 4},
-    {"rule_id": "ERR-AST-001", "file": "util.go", "line": 8},
-    {"rule_id": "ERR-AST-001", "file": "util.go", "line": 10}
+    {
+      "rule_id": "ERR-AST-001",
+      "file": "util.go",
+      "line": 4
+    },
+    {
+      "rule_id": "ERR-AST-001",
+      "file": "util.go",
+      "line": 8
+    }
   ],
-  "expected_warnings": [],
+  "expected_warnings": [
+    {
+      "rule_id": "ERR-AST-001",
+      "file": "util.go",
+      "line": 10
+    }
+  ],
   "sensitive_literals": []
 }
