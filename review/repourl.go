@@ -219,3 +219,13 @@ func isLocalLikeRemote(u string) bool {
 	}
 	return false
 }
+
+// relativizeFiles 把 findings/文件路径从仓库根的绝对路径改为相对路径
+// （克隆临时目录随机，两轮绝对路径必然失配；展示也以相对路径为准）。
+func relativizeFiles(files []diff.FileDiff, root string) {
+	prefix := root + string(filepath.Separator)
+	for i := range files {
+		files[i].NewPath = strings.TrimPrefix(files[i].NewPath, prefix)
+		files[i].OldPath = strings.TrimPrefix(files[i].OldPath, prefix)
+	}
+}

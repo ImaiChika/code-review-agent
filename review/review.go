@@ -117,6 +117,7 @@ type Options struct {
 	Files            []string            // 文件路径列表（M2-D5：整体按新增行审查）
 	RepoPath         string              // git 仓库路径（取未提交变更；此模式才可能触发沙箱）
 	RepoURL          string              // 远端仓库 URL（github.com/…）：自动浅克隆后整体审查，无需上传代码
+	FullScan         bool                // M9-G1：repo 模式全量扫描——全部文件按新增行审查（缺省 = 仅未提交变更）
 	RepoRef          string              // 可选：分支/tag/commit（缺省 = 默认分支）
 	RulesDir         string              // YAML 自定义规则目录（可空）
 	DBPath           string              // SQLite 路径
@@ -242,7 +243,15 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		inputType = "repo_path"
 		inputPath = opts.RepoPath
 		var err error
-		if opts.RepoURL != "" {
+		if opts.FullScan {
+			// M9-G1：全量扫描——仓库全部文件按新增行审查（不止未提交变更）
+			inputPath += "@full"
+			files, err = readFullRepoFiles(opts.RepoPath)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+			}
+			relativizeFiles(files, opts.RepoPath)
+		} else if opts.RepoURL != "" {
 			// repo_url 模式：整体审查——全部文件按新增行审查（等价 --files 语义）；
 			// input_path 取仓库 URL（增量对比按同一 URL 聚焦）
 			inputType = "repo_url"
@@ -251,11 +260,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			if err == nil {
 				// 路径相对化：克隆目录是随机的临时路径，增量匹配与展示都以
 				// 仓库内相对路径为准（两轮目录不同，绝对路径必然失配）
-				root := opts.RepoPath + string(filepath.Separator)
-				for i := range files {
-					files[i].NewPath = strings.TrimPrefix(files[i].NewPath, root)
-					files[i].OldPath = strings.TrimPrefix(files[i].OldPath, root)
-				}
+				relativizeFiles(files, opts.RepoPath)
 			}
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)

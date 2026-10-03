@@ -973,3 +973,85 @@ func TestCanonicalizeRepoURL(t *testing.T) {
 		t.Errorf("双前缀回归: %q", got)
 	}
 }
+
+// TestRun_RepoPathFullScan G1 集成：全量扫描审查全部文件（含已提交内容），
+// 与 diff 模式（仅未提交变更）形成对比。
+func TestRun_RepoPathFullScan(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v 失败: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", dir)
+	run("-C", dir, "config", "user.email", "t@t.co")
+	run("-C", dir, "config", "user.name", "t")
+
+	// 已提交文件含硬编码密钥（已提交 = diff 模式看不见，全量扫描能看见）
+	base := `package app
+
+func auth() string {
+	password := "hunter2-fullscan-v1"
+	return password
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.go"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fs\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", dir, "add", "-A")
+	run("-C", dir, "commit", "-qm", "base")
+
+	dbPath := filepath.Join(t.TempDir(), "review.db")
+
+	// 全量扫描：应检出已提交文件中的密钥
+	rep, err := Run(Options{
+		RepoPath:    dir,
+		FullScan:    true,
+		DBPath:      dbPath,
+		OutputDir:   t.TempDir(),
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("全量扫描失败: %v", err)
+	}
+	foundSecret := false
+	for _, f := range rep.Findings {
+		if f.RuleID == "SEC-AST-001" && strings.Contains(f.File, "app.go") {
+			foundSecret = true
+		}
+	}
+	if !foundSecret {
+		t.Error("全量扫描应检出已提交文件中的硬编码密钥")
+	}
+	if !strings.HasSuffix(rep.InputPath, "@full") {
+		t.Errorf("全量扫描 input_path 应带 @full 后缀: %q", rep.InputPath)
+	}
+	if rep.Incremental != nil {
+		t.Error("首次全量扫描不应有增量对比")
+	}
+
+	// 二次全量扫描（内容未变）→ 增量对比全部复发
+	rep2, err := Run(Options{
+		RepoPath:    dir,
+		FullScan:    true,
+		DBPath:      dbPath,
+		OutputDir:   t.TempDir(),
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("二次扫描失败: %v", err)
+	}
+	if rep2.Incremental == nil {
+		t.Fatal("二次全量扫描应有增量对比")
+	}
+	if len(rep2.Incremental.RecurFindings) == 0 {
+		t.Error("内容未变时应全部复发")
+	}
+	if len(rep2.Incremental.NewFindings) != 0 || len(rep2.Incremental.GoneFindings) != 0 {
+		t.Errorf("内容未变不应有新增/消失: %+v", rep2.Incremental)
+	}
+}

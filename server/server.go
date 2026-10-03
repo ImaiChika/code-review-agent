@@ -287,6 +287,7 @@ type createReviewRequest struct {
 	FilesContent   map[string]string `json:"files_content"`   // M7-F3：粘贴整文件 {文件名: 内容}，整体按新增行审查
 	PrURL          string            `json:"pr_url"`          // M7-F3：GitHub PR 链接（github.com/{owner}/{repo}/pull/123）
 	RepoURL        string            `json:"repo_url"`        // GitHub 仓库链接：https://github.com/{owner}/{repo}（整体审查，自动克隆）
+	FullScan       bool              `json:"full_scan"`       // M9-G1：仓库路径模式全量扫描（全部文件按新增行）
 	RepoRef        string            `json:"repo_ref"`        // 可选：分支/tag/commit
 	TaskName       string            `json:"task_name"`       // M8：用户可读的任务名称（可空，≤80 字，超长截断）
 	Sandbox        bool              `json:"sandbox"`         // 是否执行沙箱（仅 repo_path 有效）
@@ -531,6 +532,7 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		job.opts.RepoRef = req.RepoRef
 		job.opts.InputLabel = inputPath
 	}
+	job.opts.FullScan = req.FullScan
 	if err := s.queue.submit(job); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, errQueueFull) || errors.Is(err, errQueueClosed) {

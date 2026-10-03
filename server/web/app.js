@@ -404,6 +404,9 @@ async function viewReview() {
         <label>仓库路径</label>
         <input class="in" id="in-repo" placeholder="/path/to/repo">
       </div>
+      <div class="field">
+        <label><input type="checkbox" id="cb-fullscan" style="vertical-align:-2px"> 全量扫描 ${help("审查仓库全部文件（不只是未提交变更）。适合定期体检现有代码；配合同仓库多次扫描可自动对比新增/复发/已消失")}　<span class="dim" style="font-size:12px">大仓库建议关闭沙箱以加速</span></label>
+      </div>
     </div>
 
     <div class="field">
