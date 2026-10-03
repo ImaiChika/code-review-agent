@@ -21,6 +21,10 @@ pr_description.md
 # === 官方赛题资料（含腾讯版权材料，不公开）===
 官方资料/
 
+# === 本地克隆的第三方仓库（误报猎捕工作区，不入库）===
+golang_example/
+kisielk_errcheck/
+
 # === 工具输出目录 ===
 out/
 runs/
