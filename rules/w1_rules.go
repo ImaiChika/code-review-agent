@@ -29,8 +29,8 @@ import (
 func DetectLanguage(path string) string {
 	base := strings.ToLower(filepath.Base(path))
 	ext := strings.ToLower(filepath.Ext(path))
-	if strings.HasPrefix(base, ".env") {
-		return "dotenv"
+	if strings.HasPrefix(base, ".env") || ext == ".env" {
+		return "dotenv" // .env 与 *.env（mix.env/prod.env）都是 dotenv 形态
 	}
 	switch ext {
 	case ".go":
@@ -163,7 +163,7 @@ func (r *GeneralSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 // 源码语言（go/python/javascript/...）的赋值是代码表达式，不在本规则范围。
 func isConfigLanguage(lang string) bool {
 	switch lang {
-	case "dotenv", "yaml", "ini", "toml", "json":
+	case "dotenv", "env", "yaml", "ini", "toml", "json":
 		return true
 	}
 	return false
