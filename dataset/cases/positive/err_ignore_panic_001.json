@@ -1,14 +1,9 @@
 {
   "id": "err_ignore_panic_001",
-  "description": "用 _ 丢弃错误返回值（两处）+ 库代码使用 panic；模拟测试后 panic 检查降级 warnings 通道，期望随动",
+  "description": "用 _ 丢弃错误返回值（两处）+ 库代码使用 panic；显式全丢弃（_ = f()）按意图声明降级 warnings（2026-10-03 与 errcheck 生态默认对齐），混合形态 cfg, _ := 保持 findings；panic 降级 warnings 通道，期望随动",
   "category": "error_handling",
   "difficulty": "easy",
   "expected_findings": [
-    {
-      "rule_id": "ERR-AST-001",
-      "file": "util.go",
-      "line": 4
-    },
     {
       "rule_id": "ERR-AST-001",
       "file": "util.go",
@@ -16,6 +11,11 @@
     }
   ],
   "expected_warnings": [
+    {
+      "rule_id": "ERR-AST-001",
+      "file": "util.go",
+      "line": 4
+    },
     {
       "rule_id": "ERR-AST-001",
       "file": "util.go",

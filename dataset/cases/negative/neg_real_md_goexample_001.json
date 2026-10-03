@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_md_goexample_001",
+  "description": "陷阱（真实仓库 gin/zap 误报形态）：Markdown 代码块里的 Go 示例（_ 丢弃/os.Open/log.Fatal）不是被审代码，Go 语义规则不适用",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

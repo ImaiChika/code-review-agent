@@ -1,0 +1,15 @@
+{
+  "id": "neg_real_py_test_fixture_001",
+  "description": "陷阱（psf/requests 误报形态）：tests/ 目录 Python fixture 的 user:pass 测试 URL 是角色语义的测试数据——降级弱提醒不进 findings（代码角色降噪，多语言 test 判定）；SEC-GEN-001 限定配置类语言后源码/文档形态不再命中",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [
+    {
+      "rule_id": "SEC-AST-002",
+      "file": "tests/test_utils.py",
+      "line": 4
+    }
+  ],
+  "sensitive_literals": []
+}

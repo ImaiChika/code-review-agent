@@ -1,0 +1,12 @@
+--- a/screen.go
++++ b/screen.go
+@@ -1,2 +1,9 @@
+ package screen
+ 
++func (s *Screen) reset() {
++    _, _ = s.buf.WriteString(ansiReset)
++    _, _ = s.scr.WriteString(ansiReset)
++    _ = s.scr.Flush()
++    _ = s.logFile.Close()
++    _ = s.stale
++}

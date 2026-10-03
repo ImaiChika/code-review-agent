@@ -224,7 +224,11 @@ func TestDatasetDetectionQuality(t *testing.T) {
 
 		if strings.HasPrefix(res.tc.ID, "neg_") {
 			negativeTotal++
-			if len(res.findings)+len(res.warnings) > 0 {
+			// 负样本误报口径（2026-10-03 修订）：期望外的 findings/warnings 才算
+			// 误报——部分通用降级修复把惯用法从 findings 压到 warnings 通道
+			// 保留弱提醒（显式 `_ = f()` 丢弃等），样本标注用 expected_warnings
+			// 声明"允许这条弱提醒"后，它不再是意外输出。
+			if len(res.findings) > 0 || len(res.warnFP) > 0 {
 				negativeFlagged++
 			}
 		}
@@ -241,6 +245,12 @@ func TestDatasetDetectionQuality(t *testing.T) {
 		}
 		for _, f := range res.falsePositive {
 			t.Logf("       误报: %s %s:%d (%s)", f.RuleID, f.File, f.Line, f.Title)
+		}
+		for _, m := range res.warnMissed {
+			t.Logf("       warn漏检: %s %s:%d", m.RuleID, m.File, m.Line)
+		}
+		for _, f := range res.warnFP {
+			t.Logf("       warn误报: %s %s:%d (%s)", f.RuleID, f.File, f.Line, f.Title)
 		}
 	}
 

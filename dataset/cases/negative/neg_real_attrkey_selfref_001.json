@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_attrkey_selfref_001",
+  "description": "陷阱（psf/requests 误报形态）：== 比较行无数据流；getattr(other, \"password\") 的字符串是属性键（与标识符同名）而非被传递的敏感值——SEC-AST-001 检查 1/2 均不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

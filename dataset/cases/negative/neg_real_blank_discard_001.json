@@ -1,0 +1,13 @@
+{
+  "id": "neg_real_blank_discard_001",
+  "description": "陷阱（真实仓库 bubbletea/zap 误报形态）：_, _ = w.WriteString(x) 显式全丢弃是意图声明，降级弱提醒不算 findings；_ = c.Close()（safeIgnores 族）与 _ = 纯变量维持静默",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "ERR-AST-001", "file": "screen.go", "line": 4},
+    {"rule_id": "ERR-AST-001", "file": "screen.go", "line": 5},
+    {"rule_id": "ERR-AST-001", "file": "screen.go", "line": 6}
+  ],
+  "sensitive_literals": []
+}

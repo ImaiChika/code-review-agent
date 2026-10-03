@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_url_at_path_001",
+  "description": "陷阱（真实仓库 gin 误报形态）：URL path 里的 @（/@v/ 模块代理路径）不是 user:pass@ 凭据形态——凭据判定必须在 authority 段内",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -1,0 +1,11 @@
+--- a/src/auth.py
++++ b/src/auth.py
+@@ -1,2 +1,10 @@
+ 
++class HTTPBasicAuth:
++    password: str | None = None
++
++    def merge(self, other):
++        self.password = other.password
++        tokens = self.password.split(";")
++        self.password = getattr(other, "password", None)

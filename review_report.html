@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>代码审查报告 task-20261003-230033-acfb32</title>
+<style>
+  :root { --ink:#1a2233; --dim:#6b7280; --line:#e5e7eb; --accent:#4f6bed;
+    --red:#dc2626; --red-soft:#fef2f2; --orange:#d97706; --orange-soft:#fffbeb;
+    --blue:#2563eb; --blue-soft:#eff6ff; --green:#16a34a; --violet:#7c3aed; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink); background:#f7f8fa; padding:32px 16px; }
+  .wrap { max-width:900px; margin:0 auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .meta { color:var(--dim); font-size:12px; line-height:1.8; }
+  .mono { font-family:"SF Mono",Menlo,Consolas,monospace; font-size:12px; }
+  .hero { display:flex; align-items:center; gap:24px; }
+  .score { font-size:44px; font-weight:700; line-height:1; }
+  .score small { font-size:14px; color:var(--dim); font-weight:400; }
+  .grade { font-size:22px; font-weight:700; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .chip { font-size:12px; padding:3px 10px; border-radius:99px; border:1px solid var(--line);
+    background:#fff; cursor:pointer; user-select:none; }
+  .chip.on { border-color:var(--accent); color:var(--accent); background:#eef1fe; }
+  .stat { color:var(--dim); font-size:12px; }
+  .stat b { color:var(--ink); font-size:15px; }
+  details { border:1px solid var(--line); border-radius:8px; margin-bottom:8px; background:#fff; overflow:hidden; }
+  summary { padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; font-size:13px; list-style:none; }
+  summary::-webkit-details-marker { display:none; }
+  summary:hover { background:#fafbfc; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; flex-shrink:0; }
+  .b-high { color:var(--red); background:var(--red-soft); }
+  .b-medium { color:var(--orange); background:var(--orange-soft); }
+  .b-low { color:var(--blue); background:var(--blue-soft); }
+  .b-info { color:var(--dim); background:#f3f4f6; }
+  .b-warn { color:var(--violet); background:#f5f3ff; }
+  .loc { color:var(--dim); font-family:Menlo,Consolas,monospace; font-size:12px; flex-shrink:0; }
+  .ftitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fmeta { color:var(--dim); font-size:11px; flex-shrink:0; }
+  .fbody { padding:12px 14px; border-top:1px solid var(--line); }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px 14px; border-radius:8px;
+    overflow-x:auto; font-size:12px; line-height:1.6; font-family:Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all; }
+  .redacted { color:#fbbf24; }
+  .rec { margin-top:10px; font-size:13px; line-height:1.7; }
+  .rec b { color:var(--green); }
+  .bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:12px; }
+  .bar-label { width:110px; color:var(--dim); text-align:right; flex-shrink:0; }
+  .bar-track { flex:1; height:8px; background:#f1f2f4; border-radius:99px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:99px; background:var(--accent); }
+  .bar-num { width:64px; flex-shrink:0; }
+  .empty { color:var(--dim); font-size:13px; padding:14px 0; text-align:center; }
+  footer { color:var(--dim); font-size:11px; text-align:center; margin-top:24px; line-height:1.8; }
+  @media print { body { background:#fff; padding:0; } .card { break-inside:avoid; } }
+</style>
+</head>
+<body><div class="wrap">
+<div class="card hero">
+  <div>
+    <div class="score">4<small> /100</small></div>
+    <div class="grade">A 级</div>
+  </div>
+  <div style="flex:1">
+    <h1>代码审查报告</h1>
+    <div class="meta mono">任务 task-20261003-230033-acfb32 · files · /tmp/sim/kisielk_errcheck/errcheck/errcheck.go<br>
+    2026-10-03T23:00:33+08:00 → 耗时 6ms · 扫描 1 个文件（Go 1）</div>
+    <div class="chips"><span class="badge b-high">高危 <b>0</b></span><span class="badge b-medium">中危 <b>0</b></span><span class="badge b-low">低危 <b>1</b></span><span class="badge b-info">信息 <b>0</b></span></div>
+  </div>
+</div>
+<div class="card"><div class="chips" style="margin-top:0"><span class="stat">发现 <b>1</b></span><span class="stat">警告 <b>0</b></span><span class="stat">去重移除 <b>0</b></span><span class="stat mono">审查引擎 <b>code-review 1.0.0</b></span></div></div><div class="card"><div class="meta" style="margin-bottom:12px"><b style="color:var(--ink)">风险评分维度</b>（加权求和 0-100）</div><div class="bar-row">
+  <div class="bar-label">安全问题</div>
+  <div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div>
+  <div class="bar-num">0 分 · 权重 30%</div>
+</div><div class="bar-row">
+  <div class="bar-label">资源泄漏</div>
+  <div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div>
+  <div class="bar-num">0 分 · 权重 20%</div>
+</div><div class="bar-row">
+  <div class="bar-label">敏感信息</div>
+  <div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div>
+  <div class="bar-num">0 分 · 权重 15%</div>
+</div><div class="bar-row">
+  <div class="bar-label">错误处理</div>
+  <div class="bar-track"><div class="bar-fill" style="width:30.0%"></div></div>
+  <div class="bar-num">30 分 · 权重 15%</div>
+</div><div class="bar-row">
+  <div class="bar-label">测试覆盖</div>
+  <div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div>
+  <div class="bar-num">0 分 · 权重 15%</div>
+</div><div class="bar-row">
+  <div class="bar-label">并发问题</div>
+  <div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div>
+  <div class="bar-num">0 分 · 权重 5%</div>
+</div></div><div class="card">
+<div class="chips" style="margin-top:0;margin-bottom:14px" id="filters">
+  <span class="chip on" data-f="all" onclick="flt('all',this)">全部</span>
+  <span class="chip" data-f="high" onclick="flt('high',this)">高危</span>
+  <span class="chip" data-f="medium" onclick="flt('medium',this)">中危</span>
+  <span class="chip" data-f="low" onclick="flt('low',this)">低危</span>
+  <span class="chip" data-f="info" onclick="flt('info',this)">信息</span>
+  <span class="chip" data-f="warning" onclick="flt('warning',this)">警告</span>
+</div>
+<div id="list"><details data-sev="low">
+<summary>
+  <span class="badge b-low">低危</span>
+  <span class="loc">/tmp/sim/kisielk_errcheck/errcheck/errcheck.go:564</span>
+  <span class="ftitle">Token 感知：错误被吞没（返回 nil 而非 err）</span>
+  <span class="fmeta">conf 0.75 · ERR-AST-001</span>
+</summary>
+<div class="fbody">
+  <pre>	if err != nil {</pre>
+  <div class="rec"><b>修复建议</b> 应返回 err 或使用 fmt.Errorf 添加上下文</div>
+</div>
+</details><div data-sev="warning-sep" style="display:none"></div></div></div><script>
+function flt(f, el) {
+  document.querySelectorAll('#filters .chip').forEach(function (c) { c.classList.remove('on'); });
+  el.classList.add('on');
+  document.querySelectorAll('#list details').forEach(function (d) {
+    var sev = d.getAttribute('data-sev');
+    d.style.display = (f === 'all' || sev === f || (f === 'high' && sev === 'high')) ? '' : 'none';
+  });
+  var sep = document.querySelector('[data-sev="warning-sep"]');
+  if (sep) sep.style.display = (f === 'all' || f === 'warning') ? '' : 'none';
+}
+</script><footer>
+本报告由 code-review-agent 自动生成 · 生成时间 2026-10-03 23:00:33 · 任务 task-20261003-230033-acfb32<br>
+代码证据中的敏感信息已自动脱敏（<span class="redacted" style="font-size:11px">***REDACTED***</span>）；低置信度条目标记为「警告」，需人工复核。
+</footer>
+</div></body></html>

@@ -1,0 +1,9 @@
+--- a/editor.go
++++ b/editor.go
+@@ -1,2 +1,6 @@
+ package editor
+ 
++func launch(editor string) error {
++    c := exec.Command(editor) //nolint:gosec
++    return c.Run()
++}

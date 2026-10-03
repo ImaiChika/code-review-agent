@@ -56,6 +56,8 @@ func runCLI(args []string) {
 	diffFile := fs.String("diff-file", "", "diff 文件路径")
 	diffFiles := fs.String("files", "", "文件路径列表（逗号分隔，M2-D5：整体按新增行审查）")
 	repoPath := fs.String("repo-path", "", "git 仓库路径")
+	repoURL := fs.String("repo-url", "", "远端仓库 URL（github.com/owner/repo）：自动浅克隆后整体审查（M8）")
+	repoRef := fs.String("repo-ref", "", "repo-url 的分支/tag（缺省 = 默认分支）")
 	rulesDir := fs.String("rules-dir", "", "自定义 YAML 规则目录")
 	dbPath := fs.String("db", "review.db", "SQLite 数据库路径")
 	outputDir := fs.String("output", ".", "报告输出目录")
@@ -69,8 +71,8 @@ func runCLI(args []string) {
 	verbose := fs.Bool("verbose", false, "详细输出")
 	fs.Parse(args)
 
-	if *diffFile == "" && *diffFiles == "" && *repoPath == "" {
-		fmt.Fprintln(os.Stderr, "错误：必须指定 --diff-file / --files / --repo-path 之一")
+	if *diffFile == "" && *diffFiles == "" && *repoPath == "" && *repoURL == "" {
+		fmt.Fprintln(os.Stderr, "错误：必须指定 --diff-file / --files / --repo-path / --repo-url 之一")
 		fs.Usage()
 		os.Exit(1)
 	}
@@ -88,6 +90,8 @@ func runCLI(args []string) {
 		DiffFile:     *diffFile,
 		Files:        fileList,
 		RepoPath:     *repoPath,
+		RepoURL:      *repoURL,
+		RepoRef:      *repoRef,
 		RulesDir:     *rulesDir,
 		DBPath:       *dbPath,
 		OutputDir:    *outputDir,

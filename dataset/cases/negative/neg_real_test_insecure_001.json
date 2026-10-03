@@ -1,0 +1,11 @@
+{
+  "id": "neg_real_test_insecure_001",
+  "description": "陷阱（真实仓库 gin 误报形态）：测试文件里 InsecureSkipVerify 连本地 testserver 是测试常态，降级弱提醒不进 findings（代码角色降噪）",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "SEC-AST-005", "file": "client_test.go", "line": 5}
+  ],
+  "sensitive_literals": []
+}

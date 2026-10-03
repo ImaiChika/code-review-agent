@@ -1,0 +1,8 @@
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -1,2 +1,6 @@
+ 
++def test_proxy():
++    proxies = {
++        "http": "http://user:pass@localhost:8080",
++    }

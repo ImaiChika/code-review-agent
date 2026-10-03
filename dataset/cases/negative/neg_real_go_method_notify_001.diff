@@ -1,0 +1,9 @@
+--- a/exec.go
++++ b/exec.go
+@@ -1,2 +1,7 @@
+ package exec
+ 
++func (p *Program) abort(err error) {
++    go p.Send(fn(err))
++    go p.logger.Emit("aborted")
++}

@@ -2,6 +2,20 @@
 
 本文档描述 code-review-agent 的所有内置规则和自定义规则机制。
 
+## 通用降噪机制（引擎层，2026-10-03）
+
+以下机制在规则引擎层一次生效，对所有规则（含自定义 YAML 规则）适用，取代"逐仓库/逐惯用法补丁"：
+
+1. **代码角色降噪**：按路径判定文件角色——`production`（默认，不干预）/ `test`（`_test.go`、`test_*.py`、`tests/`、`testdata/` 等多语言测试形态）/ `example`（`examples/`、文档 `.md`/`.rst`/`README`/`CHANGELOG`）。非生产角色的命中置信度封顶 0.65（低于 0.7 阈值），自动进入 warnings 人工复核通道——**降级不删除**。测试 fixture 假密钥、连本地 testserver 的 `InsecureSkipVerify`、文档示例 URL 不再按生产代码标准刷屏。
+2. **`//nolint` 指令尊重**：行内含 `//nolint`（含 `//nolint:rule`）的命中直接剔除——作者显式声明的告警抑制是 lint 生态契约。
+3. **Go 语义规则的文件门控**：所有 Go 语义规则只在 `.go` 文件上执行（SEC-AST-001/002 因跨语言密钥检测设计除外）——Markdown 代码块、模板文件里的 Go 示例不再被当作代码审查。
+4. **ERR 检查的意图分层**（位置约定 + 显式丢弃约定）：
+   - 混合形态 `x, _ := f()`（末位 `_` 是错误位）→ findings（0.80）；
+   - 显式全丢弃 `_ = f()` / `_, _ = f()`（所有位置写 `_`，最强的"已知忽略"意图声明，与 errcheck 生态默认对齐）→ warnings 弱提醒（0.55）；
+   - 非末位 `_`（`_, err =`、`_, ok :=`、`for _, v := range`——按 Go 惯例不是错误位）→ 完全豁免；
+   - 类型断言 `v, _ = val.(T)`（comma-ok bool 位）→ 豁免。
+5. **URL 凭据判定限定 authority 段**：`scheme://user:pass@host` 的凭据检查只在 authority 段内进行——path 里的 `@`（如 Go module proxy 的 `/@v/list`）与 scheme 冒号不再误判。
+
 ## 内置规则（Token 感知引擎）
 
 所有内置规则基于 `go/scanner` 词法分析，不依赖正则表达式，对不完整的 diff 片段也能工作。

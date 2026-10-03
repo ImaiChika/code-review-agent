@@ -1,0 +1,8 @@
+--- a/src/requests/auth.py
++++ b/src/requests/auth.py
+@@ -1,2 +1,7 @@
+ 
++def eq(self, other):
++    a = self.password == getattr(other, "password", None)
++    b = self.token == getattr(other, "token", None)
++    return a and b

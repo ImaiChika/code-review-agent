@@ -104,6 +104,13 @@ func (r *GeneralSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 		return result, nil
 	}
 	lang := DetectLanguage(fd.NewPath)
+	// 语言限定（2026-10-03，psf/requests 整仓审查产出）：本规则的设计目标是
+	// 配置文件的"无引号 KEY=value 凭据"。源码文件（.py/.js/.rb 等）的
+	// `password = password`、`password = getattr(...)` 是代码表达式而非明文
+	// 配置——裸值在配置里是真凭据，在源码里是变量引用，无法兼得，按设计目标限定。
+	if !isConfigLanguage(lang) {
+		return result, nil
+	}
 
 	for _, line := range collectAddedLines(fd) {
 		content := line.Content
@@ -152,7 +159,17 @@ func (r *GeneralSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 	return result, nil
 }
 
-// genValueLooksReal 值侧豁免：占位符/引用/过短/名字后缀/注释性内容不是凭据。
+// isConfigLanguage 配置类语言（无引号 KEY=value 形态可能承载真实凭据的范围）。
+// 源码语言（go/python/javascript/...）的赋值是代码表达式，不在本规则范围。
+func isConfigLanguage(lang string) bool {
+	switch lang {
+	case "dotenv", "yaml", "ini", "toml", "json":
+		return true
+	}
+	return false
+}
+
+// genValueLooksReal 值侧豁免：占位符/引用/过短/名字后缀/代码表达式不是凭据。
 func genValueLooksReal(key, value string) bool {
 	if len(value) < 6 {
 		return false
@@ -171,6 +188,17 @@ func genValueLooksReal(key, value string) bool {
 		(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
 		return false
 	}
+	// 代码表达式形态（2026-10-03，psf/requests 整仓审查产出）：编程语言的赋值/
+	// 注解行会命中 key:value 形态，但值不是明文凭据——
+	//   password = getattr(other, "password", None)   → 含 ( 的调用表达式
+	//   self.password = other.password                → 带点号的属性引用
+	//   password: str | None = None                   → 类型注解（含 | 或 =）
+	if strings.Contains(value, "(") || strings.Contains(value, " | ") || strings.Contains(value, " = ") {
+		return false
+	}
+	if genBareRefRe.MatchString(value) {
+		return false
+	}
 	// 键名后缀语义：_name/_id/_ttl/_count/_path 等描述性字段不是凭据本身
 	lk := strings.ToLower(key)
 	for _, suffix := range []string{"_name", "-name", "_id", "-id", "_ttl", "_count", "_path", "_type", "_url", "-url", "_enabled"} {
@@ -180,6 +208,10 @@ func genValueLooksReal(key, value string) bool {
 	}
 	return true
 }
+
+// genBareRefRe 裸标识符/属性引用形态（other.password / url.username）——
+// 值是对既有变量的引用而非字面量；不含点号的裸词仍可能是真凭据（password: hunter2）。
+var genBareRefRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
 
 // ---------- DEL-GEN-001: 大段删除确认 ----------
 

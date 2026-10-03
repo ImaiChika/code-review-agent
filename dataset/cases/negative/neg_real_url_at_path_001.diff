@@ -1,0 +1,7 @@
+--- a/ci.sh
++++ b/ci.sh
+@@ -1,2 +1,5 @@
+ #!/bin/sh
+ 
++set -e
++curl -sSf "https://proxy.golang.org/github.com/example/pkg/@v/list"

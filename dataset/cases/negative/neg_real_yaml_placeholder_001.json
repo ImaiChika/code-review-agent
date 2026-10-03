@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_yaml_placeholder_001",
+  "description": "陷阱（真实仓库 cobra 误报形态）：${{ secrets.X }} 是 CI 运行时注入引用而非明文凭据，不构成硬编码密钥",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

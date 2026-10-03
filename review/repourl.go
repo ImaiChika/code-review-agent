@@ -95,6 +95,12 @@ func redactToken(s string) string {
 
 // readFullRepoFiles 收集仓库全部文本文件（跳过 vendored/二进制/超大文件），
 // 整体按新增行审查（等价 --files 语义）。
+//
+// 采集健壮性（2026-10-03，psf/requests 整仓审查失败教训）：
+//   - 符号链接跳过——filepath.Walk 用 Lstat，指向目录的 symlink（如
+//     requests tests/certs 里的 ca -> ../../expired/ca/）会被当普通文件
+//     采集，读取时 "is a directory" 直接拖垮整个审查；
+//   - 单个不可读文件跳过（fail-open）——采集边界内一个坏文件不应让整仓失败。
 func readFullRepoFiles(root string) ([]diff.FileDiff, error) {
 	var paths []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -108,17 +114,26 @@ func readFullRepoFiles(root string) ([]diff.FileDiff, error) {
 			}
 			return nil
 		}
+		// 符号链接不采集（可指向目录或越界路径，审查按真实文件走）
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		if len(paths) >= repoMaxFiles {
 			return fmt.Errorf("仓库文件数超过上限 %d：请改用 PR 链接审查变更，或本地部署后用仓库路径模式", repoMaxFiles)
 		}
 		if info.Size() > repoMaxFileBytes {
 			return nil // 超大文件跳过
 		}
-		// 二进制嗅探：前 8KB 含 NUL 视为二进制
-		if head, err := os.ReadFile(path); err == nil {
-			if bytes.IndexByte(head[:min(len(head), 8000)], 0) >= 0 {
-				return nil
-			}
+		// 只读前 8KB 做二进制嗅探与可读性探测（不再整读文件）
+		head := make([]byte, 8000)
+		f, ferr := os.Open(path)
+		if ferr != nil {
+			return nil // 不可读文件跳过（fail-open）
+		}
+		n, _ := f.Read(head)
+		f.Close()
+		if bytes.IndexByte(head[:n], 0) >= 0 {
+			return nil // 前 8KB 含 NUL 视为二进制
 		}
 		paths = append(paths, path)
 		return nil

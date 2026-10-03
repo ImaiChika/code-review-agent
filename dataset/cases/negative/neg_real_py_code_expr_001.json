@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_py_code_expr_001",
+  "description": "陷阱（psf/requests 误报形态）：password = getattr(...)、self.p = other.p、password: str | None = None 都是代码表达式/注解——值不是字面量凭据，SEC-GEN-001 不得上报",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

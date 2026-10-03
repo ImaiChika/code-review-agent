@@ -614,7 +614,7 @@ import "os"
 
 func sizes() (int64, bool) { return 0, false }
 
-func doErr() error { return nil }
+func doErr2() (string, error) { return "", nil }
 
 func existing() error {
 	f, err := os.Open("x")
@@ -633,11 +633,13 @@ func existing() error {
 	run("-C", dir, "add", "-A")
 	run("-C", dir, "commit", "-qm", "base")
 
-	// 未暂存变更：非 error 丢弃（17 行）+ error 丢弃（18 行）
+	// 未暂存变更：非 error 丢弃（18 行，bool 位）+ error 丢弃（19 行，末位 error）
+	// 注：载体用混合形态（n, _ :=）——显式全丢弃（_ = f）2026-10-03 起整体降级
+	// warnings，不再进入类型层判定路径。
 	changed := base + `
 func more() {
-	_, _ = sizes()
-	_ = doErr()
+	n, _ := sizes()
+	s, _ := doErr2()
 }
 `
 	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(changed), 0644); err != nil {
@@ -697,8 +699,9 @@ func TestRun_RepoTypes_FailOpen(t *testing.T) {
 	run("-C", dir, "add", "-A")
 	run("-C", dir, "commit", "-qm", "base")
 
-	// 导入不可解析：追加调用 ghost 包（类型未知 → 词法行为）与真实 error 丢弃
-	changed := base + "\nfunc more() {\n\t_, _ = ghost.Do()\n\t_ = sizes()\n}\n"
+	// 导入不可解析：追加调用 ghost 包（类型未知 → 词法行为）与真实类型已知调用
+	// （混合形态载体：显式全丢弃 2026-10-03 起降级 warnings，不再走类型层路径）
+	changed := base + "\nfunc more() {\n\tg, _ := ghost.Do()\n\tn, _ := sizes()\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte(changed), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +760,7 @@ func auth() string {
 }
 
 func write() {
-	_, _ = writeAll(nil, nil)
+	n, _ := writeAll(nil, nil)
 }
 `
 	// writeAll 未定义会类型检查失败——D3 类型加载 fail-open，词法行为保留，无妨
@@ -787,7 +790,7 @@ func auth() string {
 }
 
 func write() {
-	_, _ = writeAll(nil, nil)
+	n, _ := writeAll(nil, nil)
 }
 
 func query(name string) string {

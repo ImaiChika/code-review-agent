@@ -1,0 +1,7 @@
+--- a/docs/advanced.md
++++ b/docs/advanced.md
+@@ -1,2 +1,6 @@
+ # Proxy
+ 
++    export HTTPS_PROXY="http://user:pass@10.10.1.10:1080"
++

@@ -1,0 +1,11 @@
+--- a/client_test.go
++++ b/client_test.go
+@@ -1,2 +1,8 @@
+ package client
+ 
++func TestInsecureLocalServer(t *testing.T) {
++    tr := &http.Transport{
++        TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
++    }
++    _ = tr
++}

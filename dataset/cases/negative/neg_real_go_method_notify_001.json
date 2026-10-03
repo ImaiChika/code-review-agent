@@ -1,0 +1,12 @@
+{
+  "id": "neg_real_go_method_notify_001",
+  "description": "陷阱（真实仓库 bubbletea 误报形态）：go p.Send(x) 方法/限定调用是一次性通知动作，非常驻 worker——降级弱提醒不进 findings（裸函数 go worker(ch) 形态仍上报）",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [
+    {"rule_id": "GOR-AST-001", "file": "exec.go", "line": 4},
+    {"rule_id": "GOR-AST-001", "file": "exec.go", "line": 5}
+  ],
+  "sensitive_literals": []
+}

@@ -1,0 +1,15 @@
+{
+  "id": "neg_real_doc_example_001",
+  "description": "陷阱（psf/requests 误报形态）：文档（.md/.rst/README/HISTORY）里的 URL 凭据是讲解示例——example 角色降级弱提醒不进 findings；SEC-GEN-001 限定配置类语言后源码/文档形态不再命中",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [
+    {
+      "rule_id": "SEC-AST-002",
+      "file": "docs/advanced.md",
+      "line": 3
+    }
+  ],
+  "sensitive_literals": []
+}

@@ -1,0 +1,13 @@
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,10 @@
+ # Demo
+ 
++```go
++func main() {
++    logger, _ := zap.NewProduction()
++    f, _ := os.Open("app.log")
++    log.Fatalf("boot failed: %v", err)
++    defer f.Close()
++}
++```

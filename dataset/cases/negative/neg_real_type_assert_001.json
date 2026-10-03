@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_type_assert_001",
+  "description": "陷阱（真实仓库 gin/zap 误报形态）：v, _ = val.(T) 类型断言的 _ 是 comma-ok 存在性布尔，不是 error——不应报错误丢弃",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

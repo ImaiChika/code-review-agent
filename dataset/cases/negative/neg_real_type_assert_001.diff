@@ -1,0 +1,9 @@
+--- a/convert.go
++++ b/convert.go
+@@ -1,2 +1,6 @@
+ package convert
+ 
++func asString(val any) string {
++    s, _ := val.(string)
++    return s
++}

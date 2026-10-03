@@ -96,12 +96,22 @@ func (e *RuleEngine) Run(files []diff.FileDiff) ([]findings.Finding, error) {
 					rule.Name(), rule.ID(), err)
 				continue
 			}
+			// 代码角色降噪：多文件规则的命中同样按源文件角色分层
+			for i := range results {
+				results[i] = *(dampenFindingByRole(&results[i], DetectCodeRole(results[i].File)))
+			}
 			allFindings = append(allFindings, results...)
 		}
 	}
 
 	// 第二步：执行单文件规则
 	for _, fd := range files {
+		// 通用抑制面（2026-10-03 真实仓库误报猎捕产出）：
+		//   - //nolint 指令是作者显式的告警抑制声明（lint 生态契约），尊重之；
+		//   - 非生产角色（测试/示例代码）压置信度进 warnings 通道。
+		// 两者的语义对所有规则一致，在引擎层一次生效而非逐规则补丁。
+		nolint := nolintLineNos(fd)
+		role := DetectCodeRole(fd.NewPath)
 		for _, rule := range e.rules {
 			// 多文件规则已经在上面执行过，跳过
 			if _, ok := rule.(MultiFileRule); ok {
@@ -113,12 +123,18 @@ func (e *RuleEngine) Run(files []diff.FileDiff) ([]findings.Finding, error) {
 					rule.Name(), rule.ID(), fd.NewPath, err)
 				continue
 			}
+			results = dropNolintFindings(results, nolint)
+			for i := range results {
+				results[i] = *(dampenFindingByRole(&results[i], role))
+			}
 			allFindings = append(allFindings, results...)
 		}
 	}
 
 	return allFindings, nil
 }
+
+// dampenFindingByRole 见 coderole.go（代码角色降噪的唯一实现）。
 
 // generatedSuffixes 生成文件的文件名后缀模式（M2）。
 var generatedSuffixes = []string{

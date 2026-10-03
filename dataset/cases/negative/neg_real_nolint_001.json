@@ -1,0 +1,9 @@
+{
+  "id": "neg_real_nolint_001",
+  "description": "陷阱（真实仓库 bubbletea 误报形态）：//nolint 指令是作者显式的告警抑制声明（lint 生态契约），该行的命中应被剔除",
+  "category": "none",
+  "difficulty": "trap",
+  "expected_findings": [],
+  "expected_warnings": [],
+  "sensitive_literals": []
+}

@@ -68,6 +68,11 @@ func isCommentLine(content string) bool {
 
 func (r *TokenContextCancelRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
+
+	// 通用文件门控：本规则检查的是 Go 语义，非 Go 文本（Markdown/模板/配置）不适用。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	added := collectAddedLines(fd)
 
 	for _, line := range added {

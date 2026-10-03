@@ -36,6 +36,11 @@ func (r *TokenInsecureTLSRule) Category() findings.Category { return findings.Ca
 
 func (r *TokenInsecureTLSRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
+
+	// 通用文件门控：本规则检查的是 Go 语义，非 Go 文本（Markdown/模板/配置）不适用。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	for _, line := range collectAddedLines(fd) {
 		if isCommentLine(line.Content) {
 			continue
@@ -182,6 +187,11 @@ var mutexLockRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_.\[\]\*]*?)\.Lock\(\)
 
 func (r *TokenMutexRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
+
+	// 通用文件门控：本规则检查的是 Go 语义，非 Go 文本（Markdown/模板/配置）不适用。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	added := collectAddedLines(fd)
 
 	for _, line := range added {
@@ -241,6 +251,11 @@ func (r *TokenLoopTimerRule) Category() findings.Category { return findings.Cate
 
 func (r *TokenLoopTimerRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
+
+	// 通用文件门控：本规则检查的是 Go 语义，非 Go 文本（Markdown/模板/配置）不适用。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	added := collectAddedLines(fd)
 
 	// (a) defer 在 for 循环体内：花括号深度跟踪。
@@ -377,6 +392,11 @@ var rowsQueryRe = regexp.MustCompile(`\brows\s*,\s*err\s*(?::=|=)\s*.*\.Query(?:
 
 func (r *TokenRowsErrRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
+
+	// 通用文件门控：本规则检查的是 Go 语义，非 Go 文本（Markdown/模板/配置）不适用。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
 	added := collectAddedLines(fd)
 
 	for _, line := range added {

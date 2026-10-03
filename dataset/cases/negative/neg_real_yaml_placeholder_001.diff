@@ -1,0 +1,8 @@
+--- a/.github/workflows/labeler.yml
++++ b/.github/workflows/labeler.yml
+@@ -1,2 +1,6 @@
+ name: labeler
+ 
++jobs:
++  label:
++    repo-token: ${{ secrets.GITHUB_TOKEN }}

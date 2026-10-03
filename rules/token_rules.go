@@ -71,6 +71,11 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 				strings.Contains(content, "secretmanager") {
 				continue
 			}
+			// 自引用属性键（requests 真实误报形态）：password = getattr(other, "password", None)
+			// 里的 "password" 是属性名反射查找，不是被赋值的密钥——值与标识符同名时豁免。
+			if strings.Trim(value, "\"'`") == ident {
+				continue
+			}
 			if isSensitiveIdent(ident) && !isLikelyNotSecret(value) {
 				f := findings.NewFinding(
 					r.Severity(), r.Category(), r.ID(),
@@ -96,8 +101,18 @@ func (r *TokenSecretRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 				if strings.Contains(content, "`") {
 					continue
 				}
+				// 比较行没有数据流（requests 真实误报形态）：
+				// self.password == getattr(other, "password", None) 是相等判断，
+				// 行内的字符串是属性键，不是被传递的敏感值。
+				if strings.Contains(content, "==") {
+					continue
+				}
 				strs := analysis.FindStringLiterals()
 				for _, s := range strs {
+					// 自引用属性键豁免（同检查 1）：字符串内容就是标识符本身
+					if strings.Trim(s, "\"'`") == name {
+						continue
+					}
 					if !isLikelyNotSecret(s) {
 						f := findings.NewFinding(
 							findings.SeverityMedium, r.Category(), r.ID(),
@@ -229,7 +244,7 @@ func detectLeakPattern(s string) (bool, string, float64) {
 	lower := strings.ToLower(s)
 	dbPrefixes := []string{"mysql://", "postgres://", "postgresql://", "mongodb://", "mongodb+srv://", "redis://"}
 	for _, prefix := range dbPrefixes {
-		if strings.HasPrefix(lower, prefix) && strings.Contains(s, "@") && strings.Contains(s, ":") {
+		if strings.HasPrefix(lower, prefix) && urlAuthorityHasCredentials(s) {
 			return true, "Token 感知：数据库连接串泄漏（含密码）", 0.95
 		}
 	}
@@ -261,15 +276,36 @@ func detectLeakPattern(s string) (bool, string, float64) {
 	}
 	// URL with credentials
 	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		atIdx := strings.Index(s, "@")
-		colonIdx := strings.Index(s, ":")
-		if atIdx > 0 && colonIdx > 0 && colonIdx < atIdx {
-			// http://user:pass@host
+		if urlAuthorityHasCredentials(s) {
 			return true, "Token 感知：URL 中嵌入了凭据", 0.90
 		}
 	}
 
 	return false, "", 0
+}
+
+// urlAuthorityHasCredentials 判定 URL 的 authority 段（scheme://user:pass@host）
+// 是否内嵌凭据。只在 authority 内检查 user:pass@——path/query 里的 @ 与 scheme
+// 冒号都不参与（gin goreleaser.yml 的 `https://proxy.golang.org/.../@v/...`
+// 误报根因：旧实现对全串找 @ 和 :，把 path 的 @v 和 scheme 的冒号当成了凭据形态）。
+func urlAuthorityHasCredentials(s string) bool {
+	i := strings.Index(s, "://")
+	if i < 0 {
+		return false
+	}
+	rest := s[i+3:]
+	authority := rest
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		authority = rest[:end]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at <= 0 {
+		return false
+	}
+	userinfo := authority[:at]
+	colon := strings.Index(userinfo, ":")
+	// user 与 password 均非空
+	return colon > 0 && colon < len(userinfo)-1
 }
 
 // isUpperAlphanumeric 检查字符串是否全是大写字母和数字。
@@ -343,6 +379,27 @@ func (r *TokenGoroutineRule) Check(fd diff.FileDiff) ([]findings.Finding, error)
 				continue
 			}
 
+			// go + 限定调用（go p.Send(x)、go obj.Emit(e)、go pkg.Fn()）：
+			// 方法/包前缀动词调用是一次性动作语义（异步通知/发送/记录），
+			// 非常驻 worker——词法层无法证明泄漏，降级弱信号（bubbletea
+			// exec.go 的 go p.Send(fn(err)) 三连误报根因）。
+			// 裸标识符（go worker(ch)）是 handler 启动惯例，保持上报。
+			if qualifiedGoCallRe.MatchString(line.Content) {
+				f := findings.NewFinding(
+					findings.SeverityLow, r.Category(), r.ID(),
+					"Token 感知：goroutine 启动形态需确认退出（限定调用）",
+					fd.NewPath, line.NewLine,
+					line.Content,
+					"确认该 goroutine 是一次性动作；若为常驻任务，为其添加退出机制（context.WithCancel + select）",
+					0.65,
+					"token:goroutine_leak",
+				)
+				f.EvidenceChain = findings.BuildEvidenceChain(fd.NewPath, line.NewLine, r.ID(),
+					"qualified go call (method/pkg-qualified), leak not provable at lexical level", 0.65)
+				result = append(result, *f)
+				continue
+			}
+
 			f := findings.NewFinding(
 				r.Severity(), r.Category(), r.ID(),
 				"Token 感知：goroutine 可能泄漏",
@@ -411,6 +468,10 @@ func isClosureGoroutine(goLine string) bool {
 	return strings.HasPrefix(strings.TrimPrefix(trimmed, "go "), "func")
 }
 
+// qualifiedGoCallRe go + 方法/包限定调用（一次性动作语义）：
+// go p.Send( / go obj.Emit( / go pkg.Fn(——不匹配闭包（go func）与裸标识符（go worker）。
+var qualifiedGoCallRe = regexp.MustCompile(`^\s*go\s+[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+\s*\(`)
+
 // ========== RES-AST-001: Token 感知的资源泄漏检测 ==========
 
 // TokenResourceRule 使用词法分析检测资源泄漏。
@@ -451,6 +512,13 @@ func (r *TokenResourceRule) SetRepoTypes(rt *analyzer.RepoTypes) { r.repoTypes =
 func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
 
+	// 通用文件门控（2026-10-03）：资源泄漏检查的是 Go 调用形态（os.Open 等），
+	// 非 Go 文本（Markdown 代码块/CHANGELOG/模板）里的"open 调用"不是代码，
+	// 报"资源未关闭"纯属噪音（gin docs/doc.md 二十余条误报的根因）。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
+
 	// M2 规则深化：Close 检查范围从"单个 hunk"扩大到"文件全部 hunk 的行"。
 	// 修复跨 hunk 生命周期误报：open 在 hunk1、defer Close 在 hunk2 是合法代码，
 	// 以前按 hunk 局部检查会把这类正常代码误报为资源泄漏。
@@ -476,6 +544,10 @@ func (r *TokenResourceRule) Check(fd diff.FileDiff) ([]findings.Finding, error) 
 		}
 
 		for i, content := range addedLines {
+			// 注释行里的 open 调用不是代码（zap logger.go 的注释示例误报根因）
+			if isCommentLine(content) {
+				continue
+			}
 			for call, closeMethod := range resourceOpenCalls {
 				if strings.Contains(content, call) {
 					// 构造器语义：句柄被 return 交给调用方时关闭责任已转移，不算本函数泄漏
@@ -597,6 +669,12 @@ func (r *TokenErrorRule) SetRepoTypes(rt *analyzer.RepoTypes) { r.repoTypes = rt
 func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 	var result []findings.Finding
 
+	// 通用文件门控：错误处理检查的是 Go 语义（_ 丢弃/panic/log.Fatal），
+	// 非 Go 文本（Markdown 代码块/模板）不适用（zap .readme.tmpl 误报根因）。
+	if !fd.IsGoFile() {
+		return nil, nil
+	}
+
 	for _, hunk := range fd.Hunks {
 		// 跨行检查：错误被吞没
 		if finding := checkSwallowedErrorToken(fd.NewPath, hunk); finding != nil {
@@ -624,7 +702,7 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 			//   Go 惯例"最后一个返回值才是 error"——非末位返回值（中间结果/
 			//   存在性布尔/已接收 err 的并列位）按约定不是错误，_ 丢弃合法；
 			//   只有末位 _（或单返回值整体丢弃）才是疑似错误丢弃。
-			// 分级：repo 模式类型已知 → 按类型定论；类型未知/非 repo →
+			// 分层：repo 模式类型已知 → 按类型定论；类型未知/非 repo →
 			//   词法判定，强信号报 findings、弱信号降级 warnings。
 			if !strings.HasSuffix(fd.NewPath, "_test.go") {
 				lhs := content
@@ -637,6 +715,33 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 				underIdx := underscoreIndices(parts)
 
 				if len(underIdx) > 0 {
+					// 显式全丢弃（`_ = f()` / `_, _ = f()`）：LHS 每个位置都写了 _，
+					// 是最强的"已知返回值、刻意忽略"意图声明（errcheck 生态默认
+					// 同样不查显式 blank 赋值）。降级 0.55 进 warnings 保留弱提醒，
+					// 与混合形态 `x, _ := f()`（顺手丢末位 err，维持上报）区分。
+					// 沿用旧守卫：var _ 编译期断言、RHS 无调用的纯变量清理不报；
+					// safeIgnores 调用族（Write/Close/Print 等输出面）维持静默。
+					if len(underIdx) == len(parts) {
+						if strings.HasPrefix(strings.TrimSpace(content), "var ") {
+							continue
+						}
+						rhsFull := content[strings.LastIndex(content, "=")+1:]
+						if !strings.Contains(rhsFull, "(") {
+							continue
+						}
+						if containsSafeIgnore(content) {
+							continue
+						}
+						result = append(result, *r.newErrDiscardFinding(fd, line, content, 0.55))
+						continue
+					}
+
+					// 类型断言 comma-ok：`v, _ = val.(T)` 的 _ 是 bool 存在性位，
+					// 语法层可判（RHS 是断言表达式而非函数调用）——非 error，豁免。
+					if typeAssertionRHSPattern(content) {
+						continue
+					}
+
 					// D3 类型层（repo 模式）：逐位定论
 					if r.repoTypes != nil {
 						anyError, allKnown, knownNonError := false, true, 0
@@ -662,15 +767,18 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 					}
 
 					// 词法层：位置约定 + 形态
+					// 位置约定（2026-10-03 收紧）：Go 惯例只有末位返回值是 error——
+					// 非末位 _（`_, err =`/`_, ok :=`/`for _, v := range`）按约定不是
+					// 错误位，完全豁免（此前留的 0.65 弱提醒通道在真实仓库与 R3
+					// 陷阱样本上是纯噪音，且与类型层判定语义重复——repo 模式下
+					// 类型层对非常规签名仍能精确检出）。
 					if isIgnoredErrorToken(analysis, content) {
 						finalPos := len(parts) - 1
 						_, strong := underIdxFinal(underIdx, finalPos)
-						severity, conf := findings.SeverityLow, 0.65
-						if strong {
-							severity, conf = findings.SeverityMedium, 0.80
+						if !strong {
+							continue
 						}
-						result = append(result, *r.newErrDiscardFinding(fd, line, content, conf))
-						_ = severity
+						result = append(result, *r.newErrDiscardFinding(fd, line, content, 0.80))
 						continue
 					}
 				}
@@ -696,7 +804,10 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 			}
 
 			// 检查 3：log.Fatal 使用
-			if isLogFatalUsage(analysis, content) && !isMainOrTestFile(fd.NewPath) {
+			// 判据通用化（2026-10-03）：程序/工具（package main）里 log.Fatal
+			// 直接退出属预期语义——从"文件名 main.go/cmd/"扩展为包声明判据
+			// （zap internal/readme/readme.go 这类工具文件不再误报）。
+			if isLogFatalUsage(analysis, content) && !isMainOrTestFile(fd.NewPath) && !fileDeclaresPackageMain(fd) {
 				f := findings.NewFinding(
 					r.Severity(), r.Category(), r.ID(),
 					"Token 感知：库代码使用 log.Fatal（会直接退出进程）",
@@ -720,7 +831,7 @@ func (r *TokenErrorRule) Check(fd diff.FileDiff) ([]findings.Finding, error) {
 // isIgnoredErrorToken 检查是否用 _ 忽略了错误返回值。
 // safeIgnores 已知安全忽略的调用族（输出/关闭类，err 丢弃属常态）。
 var safeIgnores = []string{
-	"fmt.Print", "fmt.Fprint", "io.Copy", "io.WriteString",
+	"fmt.Print", "fmt.Sprint", "fmt.Fprint", "io.Copy", "io.WriteString",
 	".Write(", ".Close()", ".Commit()", ".Rollback()",
 	"os.Remove(", "os.RemoveAll(", "json.Marshal(", ".EmitEvent(",
 	"json.Unmarshal(", "json.NewDecoder(", ".Scan(", ".Encode(",
@@ -756,13 +867,21 @@ func isIgnoredErrorToken(analysis analyzer.TokenAnalysis, content string) bool {
 	}
 
 	// safeIgnores：调用族已知安全忽略面（Write/Close/Print 等输出类）
-	for _, safe := range safeIgnores {
-		if strings.Contains(content, safe) {
-			return false
-		}
+	if containsSafeIgnore(content) {
+		return false
 	}
 
 	return true
+}
+
+// containsSafeIgnore 行内容命中 safeIgnores 调用族（输出/关闭类，err 丢弃属常态）。
+func containsSafeIgnore(content string) bool {
+	for _, safe := range safeIgnores {
+		if strings.Contains(content, safe) {
+			return true
+		}
+	}
+	return false
 }
 
 // underscoreIndices 返回 LHS 中 _ 的位置下标列表。
@@ -774,6 +893,34 @@ func underscoreIndices(parts []string) []int {
 		}
 	}
 	return out
+}
+
+// typeAssertRHSPre 类型断言形态：赋值 RHS 直接是 `expr.(T)`——
+// 特征是点号紧跟左括号（val.(string)）；限定调用 ghost.Do( 不匹配（点后是标识符）。
+var typeAssertRHSPre = regexp.MustCompile(`=\s*[A-Za-z_][A-Za-z0-9_.\[\]]*\.\(`)
+
+// typeAssertionRHSPattern 判断赋值的 RHS 是否为类型断言表达式（`v, _ = val.(T)`）。
+// 断言的双返回值是 (T, bool)——末位 _ 丢弃的是存在性布尔而非 error。
+func typeAssertionRHSPattern(content string) bool {
+	idx := strings.LastIndex(content, "=")
+	if idx < 0 {
+		return false
+	}
+	return typeAssertRHSPre.MatchString(content[idx:])
+}
+
+// fileDeclaresPackageMain 文件（可见范围内）是否声明 package main。
+// 包声明行不在本次变更中（小 diff）时返回 false，调用方退回文件名判据。
+func fileDeclaresPackageMain(fd diff.FileDiff) bool {
+	for _, hunk := range fd.Hunks {
+		for _, line := range hunk.Lines {
+			t := strings.TrimSpace(line.Content)
+			if strings.HasPrefix(t, "package ") {
+				return t == "package main"
+			}
+		}
+	}
+	return false
 }
 
 // underIdxFinal 判断 _ 是否占据末位（Go 惯例 error 位）。
@@ -1088,7 +1235,7 @@ func hasTestFunction(content []string, funcName string) bool {
 
 		// 精确匹配：func TestGreet(
 		if strings.Contains(line, "func "+testFuncName+"(") {
-			// 检查函数体是否有效（非空、有调用）
+			// 检查测试函数体是否有效（非空、有调用）
 			if hasEffectiveTestBody(content, funcName) {
 				return true
 			}
@@ -1097,8 +1244,10 @@ func hasTestFunction(content []string, funcName string) bool {
 		if strings.Contains(line, "func "+testFuncName+"_") {
 			return true
 		}
-		// 调用匹配：Greet( 在测试函数体内
-		if containsFunctionCallToken(line, funcName) {
+		// 引用匹配：测试体内以任何形式使用该函数——含函数值传递形态
+		// （zap encoder_test.go 的 `EncodeLevel: LowercaseLevelEncoder` 无括号
+		// 引用是 Go 一等函数惯用法，只认调用形态会漏判覆盖）
+		if containsIdentifierRef(line, funcName) {
 			return true
 		}
 	}
@@ -1137,6 +1286,17 @@ func hasEffectiveTestBody(content []string, targetFuncName string) bool {
 	}
 
 	return false
+}
+
+// containsIdentifierRef 检查一行是否以词边界引用了指定标识符
+// （调用、函数值传递、字段赋值等任何形态）。
+func containsIdentifierRef(line, funcName string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "func ") || strings.HasPrefix(trimmed, "//") {
+		return false
+	}
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(funcName) + `\b`)
+	return re.MatchString(line)
 }
 
 // containsFunctionCallToken 检查一行是否包含函数调用。
@@ -1183,6 +1343,14 @@ func isSensitiveIdent(ident string) bool {
 
 func isLikelyNotSecret(value string) bool {
 	value = strings.Trim(value, "\"'`")
+	// 模板/CI 引用形态：值是运行时注入的引用而非明文凭据——
+	// `${{ secrets.X }}`（GitHub Actions）、`${VAR}`、`{{ .Values.x }}`（Helm）、
+	// `<%= %>`（ERB）。cobra labeler.yml 的 repo-token 误报根因。
+	for _, prefix := range []string{"${{", "${", "{{", "<%", "%{"} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
 	// R3②延伸：含格式动词的是格式串模板（"password=%s"），不是密钥本身
 	if strings.Contains(value, "%s") || strings.Contains(value, "%d") ||
 		strings.Contains(value, "%v") || strings.Contains(value, "%q") {

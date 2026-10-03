@@ -1,49 +1,42 @@
 {
-  "task_id": "task-20260729-232426",
-  "start_time": "2026-07-29T23:24:26+08:00",
-  "end_time": "2026-07-29T23:24:26+08:00",
-  "duration": "1ms",
-  "input_type": "diff_file",
-  "input_path": "testdata/security_issue.diff",
+  "task_id": "task-20261003-230033-acfb32",
+  "start_time": "2026-10-03T23:00:33+08:00",
+  "end_time": "2026-10-03T23:00:33+08:00",
+  "duration": "6ms",
+  "input_type": "files",
+  "input_path": "/tmp/sim/kisielk_errcheck/errcheck/errcheck.go",
   "files_count": 1,
   "go_files_count": 1,
   "summary": {
-    "total_findings": 2,
+    "total_findings": 1,
     "total_warnings": 0,
     "dedup_removed": 0,
     "by_severity": {
-      "high": 2
+      "low": 1
     },
     "by_category": {
-      "security": 2
+      "error_handling": 1
     }
   },
   "findings": [
     {
-      "severity": "high",
-      "category": "security",
-      "rule_id": "SEC-AST-001",
-      "title": "Token 感知：疑似硬编码密钥",
-      "file": "config.go",
-      "line": 9,
-      "evidence": "\tAPIKey    string = \"sk-abc123secretkey2024\"",
-      "recommendation": "将密钥移至环境变量或密钥管理服务",
-      "confidence": 0.9,
-      "source": "token:hardcoded_secret",
-      "timestamp": "2026-07-29T23:24:26+08:00"
-    },
-    {
-      "severity": "high",
-      "category": "security",
-      "rule_id": "SEC-AST-001",
-      "title": "Token 感知：疑似硬编码密钥",
-      "file": "config.go",
-      "line": 10,
-      "evidence": "\tDBPassword string = \"admin123456\"",
-      "recommendation": "将密钥移至环境变量或密钥管理服务",
-      "confidence": 0.9,
-      "source": "token:hardcoded_secret",
-      "timestamp": "2026-07-29T23:24:26+08:00"
+      "severity": "low",
+      "category": "error_handling",
+      "rule_id": "ERR-AST-001",
+      "title": "Token 感知：错误被吞没（返回 nil 而非 err）",
+      "file": "/tmp/sim/kisielk_errcheck/errcheck/errcheck.go",
+      "line": 564,
+      "evidence": "\tif err != nil {",
+      "recommendation": "应返回 err 或使用 fmt.Errorf 添加上下文",
+      "evidence_chain": [
+        "hunk: /tmp/sim/kisielk_errcheck/errcheck/errcheck.go@L564",
+        "fact: if err != nil followed by return nil",
+        "rule: ERR-AST-001",
+        "confidence: 0.75"
+      ],
+      "confidence": 0.75,
+      "source": "token:error_swallowed",
+      "timestamp": "2026-10-03T23:00:33+08:00"
     }
   ],
   "warnings": null,
@@ -53,6 +46,13 @@
     "denied": 0,
     "ask_human": 0
   },
+  "skill": {
+    "name": "code-review",
+    "description": "自动代码审查技能，基于 Token 感知的语义分析引擎",
+    "version": "1.0.0",
+    "loaded": true,
+    "source": "skills"
+  },
   "sandbox_summary": {
     "total_runs": 0,
     "successful": 0,
@@ -61,15 +61,63 @@
     "total_duration": "0s"
   },
   "monitor": {
-    "total_duration": "1ms",
-    "rule_duration": "0s",
+    "total_duration": "6ms",
+    "rule_duration": "5ms",
     "sandbox_duration": "0s",
-    "tool_call_count": 2,
-    "rule_count": 6,
+    "tool_call_count": 0,
+    "rule_count": 17,
     "files_scanned": 1,
     "permission_denied": 0,
     "exception_count": 0,
-    "risk_score": 30,
-    "risk_grade": "B"
+    "artifacts_saved": 3,
+    "artifacts_rejected": 0,
+    "llm_reviewed": 0,
+    "llm_dropped": 0,
+    "risk_score": 4.5,
+    "risk_grade": "A",
+    "risk_breakdown": {
+      "安全问题": {
+        "name": "安全问题",
+        "weight": 0.3,
+        "score": 0,
+        "count": 0,
+        "weighted": 0
+      },
+      "并发问题": {
+        "name": "并发问题",
+        "weight": 0.05,
+        "score": 0,
+        "count": 0,
+        "weighted": 0
+      },
+      "敏感信息": {
+        "name": "敏感信息",
+        "weight": 0.15,
+        "score": 0,
+        "count": 0,
+        "weighted": 0
+      },
+      "测试覆盖": {
+        "name": "测试覆盖",
+        "weight": 0.15,
+        "score": 0,
+        "count": 0,
+        "weighted": 0
+      },
+      "资源泄漏": {
+        "name": "资源泄漏",
+        "weight": 0.2,
+        "score": 0,
+        "count": 0,
+        "weighted": 0
+      },
+      "错误处理": {
+        "name": "错误处理",
+        "weight": 0.15,
+        "score": 30,
+        "count": 1,
+        "weighted": 4.5
+      }
+    }
   }
 }

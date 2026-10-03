@@ -5,7 +5,11 @@
   "difficulty": "easy",
   "expected_findings": [],
   "expected_warnings": [
-    {"rule_id": "ERR-AST-001", "file": "ksuid.go", "line": 4}
+    {
+      "rule_id": "ERR-AST-001",
+      "file": "ksuid.go",
+      "line": 5
+    }
   ],
   "sensitive_literals": []
 }
