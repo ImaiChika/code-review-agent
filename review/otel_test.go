@@ -178,8 +178,9 @@ func TestRun_OtelSandboxSpans(t *testing.T) {
 		if attrs["tool.safety.decision"] != "allow" {
 			t.Errorf("tool.safety.decision = %q, 期望 allow", attrs["tool.safety.decision"])
 		}
-		// staticcheck 在本地环境可能未安装（exit 127，属正常降级），其余命令必须成功
-		if strings.HasPrefix(attrs["sandbox.command"], "staticcheck") {
+		// staticcheck/govulncheck 在本地环境可能未安装（exit 127，属正常降级），其余命令必须成功
+		if strings.HasPrefix(attrs["sandbox.command"], "staticcheck") ||
+			strings.HasPrefix(attrs["sandbox.command"], "govulncheck") {
 			continue
 		}
 		if attrs["sandbox.exit_code"] != "0" {
