@@ -775,7 +775,8 @@ rules:
 > - 🔬 **第二轮真实仓库盲测 + 通用化降噪（2026-10-03，用户指出"补漏式修复不通用"后的全面整改）**：换 5 个**未测过**的真实仓库（gin-gonic/gin、spf13/cobra、charmbracelet/bubbletea、psf/requests、uber-go/zap）重做 ground truth 对照。**盲测结果（修复前）**：4 Go 仓 177 条 findings 全部误报 + requests 因符号链接（`tests/certs` 里 `ca -> ../../expired/ca/`）**整仓失败**。归因后放弃惯用法补丁、实施**五层通用化修复**：①采集健壮性（symlink/不可读文件跳过 + 8KB 嗅探，requests 恢复可审）；②引擎层**代码角色降噪**（production/test/example 三角色，test 覆盖多语言 `_test.go`/`test_*.py`/`tests/`，文档归 example；非生产置信度封顶 0.65 进 warnings，降级不删除）+ **//nolint 剔除**（lint 生态契约）；③Go 语义规则全部加 `.go` 文件门控（md/tmpl/yml 不再进 Go 规则）；④ERR 语义三段分层（显式全丢弃 `_ = f`/`_, _ = f` → 0.55 warnings 与 errcheck 生态默认对齐；非末位 `_` 完全豁免——顺带修掉 5db3224 重引入的 `for _, v := range` 弱警告噪音；类型断言 `v,_=val.(T)` 豁免；log.Fatal 判据从文件名通用化为 package main 包声明）；⑤SEC 系精化（URL 凭据限定 authority 段——`/…/@v/list` 不再误判；`${{ secrets.X }}` 模板引用豁免；`==` 比较行与 getattr 自引用属性键豁免；SEC-GEN-001 限定配置类语言 dotenv/yaml/ini/toml/json）。**修复后**：5 仓 findings **177+1 失败 → 5**（余 5 条均为 `x, _ := strconv.ParseXxx` 回退默认值惯用法，errcheck 同样上报的中危灰区），风险分 66.7/39/59/39/失败 → 9/9/0/0/0（全 A）；requests 0 findings。数据集 +12 陷阱负样本（97 样本门禁 100%/100%/0%，warnings 匹配 14/14——顺带修复基线遗留的 8 条 warnings 漏检与 2 处标注行号笔误）；harness 负样本口径修订为"期望外 findings/warnings 才算误报"；13 包 -race 全绿。CLI 补 `--repo-url`/`--repo-ref`（此前仅 API 支持）。测试环境：codeload tarball + 本地 bare 镜像 + `GIT_CONFIG_*` insteadOf 注入（github.com 网络不可达时的等效全链路验证法）。
 > - 🐛 **混合语言上传测试抓到真 bug（2026-10-03）**：`*.env` 后缀文件（mix.env/prod.env）被 DetectLanguage 返回 "env"——不在 isConfigLanguage 白名单 → GEN-001 静默跳过。原实现只识别名为 `.env*` 开头的文件。修复：ext == ".env" 也判 dotenv + isConfigLanguage 加 "env" 别名。这印证了模拟测试的价值：该 bug 在合成样本（名为 .env.production）上永远暴露不出来。
 > - ✅ **G1 全量扫描开关完成（2026-10-03，M9 首项）**：repo 模式 `FullScan`——全部文件按新增行审查（不止未提交变更），`input_path` 带 `@full` 后缀与 diff 模式基准分离（D7 各自对比）；采集边界与 repo_url 共用（readFullRepoFiles + relativizeFiles 抽为共享函数）。server `full_scan` 参数、CLI `--full-scan`、UI 仓库路径 tab 勾选（含大仓库建议）。测试：review 集成 +1（已提交密钥全量检出 + 二次扫描全复发 + 首扫无增量）；13 包 -race 全绿；线上冒烟 ✓（自建仓库已提交密钥检出）。**遗留注记**：server 侧 InputLabel 覆盖 input_path 时 @full 后缀被抹平（diff/full 共享基准）——语义可接受但记录在案。
-> - ⏭ M9 剩余：G2 代码角色系统 → G3 govulncheck → G4/G5。
+> - ✅ **G3 govulncheck 依赖漏洞检测完成（2026-10-04，M9 第三项）**：`review/govulncheck.go`——govulncheck -json 流式解析（JSON decoder 逐条，非 JSON 行忽略；OSV 条目 → findings，severity low/quality 分类不参与评分，evidence 携带 CVE 别名）；沙箱命令表加 `govulncheck -json ./...`（exit 0/1 解析，其他=工具失败同 staticcheck 纪律）；Dockerfile 沙箱镜像补装 govulncheck@v1.1.3（版本固定）。**边界**：漏洞库需网络——container 网络隔离下优雅跳过，local/e2b 可用。测试：解析单测 +2（流式解析/垃圾输入容错）；otel span 计数断言随命令表 3→4 更新；13 包 -race 全绿；门禁 77 样本不回退。
+> - ⏭ M9 剩余：G4 整查聚合视图 → G5 性能护栏 → 收尾。
 
 #### M9 · 现有代码整查增强（v1.3 方向）▶ 计划已制定（2026-10-01，用户确认后开工）
 
@@ -893,7 +894,7 @@ rules:
 |---|--------|------|--------|
 | G1 | 全量扫描开关 | repo_path 模式 full_scan 参数：全文件按新增行审查；采集边界与 repo_url 共用；D7 增量自动生效 | S-M |
 | G2 | 代码角色系统集成 ✅（2026-10-03 验证，并行会话产出） | 引擎已接线：多文件与单文件结果均按 DetectCodeRole 逐条 dampen（test/example 角色置信 cap 0.65 入 warnings）、//nolint 指令剔除；多语言测试判定（Go/Py/JS/TS/Java + testdata 目录）；与 ERR 位置约定/置信分层重构兼容（分层共存测试通过）。GEN-001 的 isConfigLanguage 即 config 角色的规则侧适用域 | M |
-| G3 | govulncheck 依赖漏洞检测 | 沙箱内运行官方 govulncheck -json，解析为 findings（source: tool:govulncheck）；container 需镜像预装/预刷漏洞库 | M |
+| G3 | govulncheck 依赖漏洞检测 ✅（2026-10-04） | `review/govulncheck.go`：govulncheck -json 流式 JSON 解析（OSV 条目 → GOV-GEN-001 findings，quality 分类不参与评分，evidence 含 CVE 别名）；沙箱命令表 + Dockerfile 沙箱镜像补装 govulncheck@v1.1.3；**边界**：需网络拉漏洞库（local/e2b 沙箱可用，container 网络隔离跳过）；解析失败静默不影响主流程 | M |
 | G4 | 整查聚合视图 | 按目录发现密度、Top 风险文件、报告三格式同步 | S-M |
 | G5 | 大仓库性能护栏 | 三段耗时入 Monitor、分段进度、类型检查失败缓存 | S |
 

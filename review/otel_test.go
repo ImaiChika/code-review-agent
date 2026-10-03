@@ -164,8 +164,8 @@ func TestRun_OtelSandboxSpans(t *testing.T) {
 		}
 	}
 	// M3-D2 起沙箱命令为 3 条（go vet / go test / staticcheck）
-	if len(sandboxSpans) != 3 {
-		t.Fatalf("应有 3 个 sandbox.exec span (go vet / go test / staticcheck), 得到 %d", len(sandboxSpans))
+	if len(sandboxSpans) != 4 {
+		t.Fatalf("应有 4 个 sandbox.exec span (go vet / go test / staticcheck / govulncheck), 得到 %d", len(sandboxSpans))
 	}
 	for _, sp := range sandboxSpans {
 		attrs := attrsOf(sp)

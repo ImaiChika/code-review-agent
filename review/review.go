@@ -769,7 +769,7 @@ func runSandbox(ctx context.Context, opts Options, sandboxMode, taskID string, c
 
 	// 对 Go 项目执行 go vet 和 go test
 	// M3-D2：staticcheck 已预装在沙箱镜像（Dockerfile）；本地模式未安装时该命令失败但不影响流程
-	sandboxCmds := []string{"go vet ./...", "go test -count=1 -timeout=30s ./...", "staticcheck ./..."}
+	sandboxCmds := []string{"go vet ./...", "go test -count=1 -timeout=30s ./...", "staticcheck ./...", "govulncheck -json ./..."}
 
 	for _, cmd := range sandboxCmds {
 		// M1-B6：每条沙箱命令一个子 span，决策/退出码/超时全部落 span 属性
@@ -877,6 +877,14 @@ func runSandbox(ctx context.Context, opts Options, sandboxMode, taskID string, c
 			c.toolFindings = append(c.toolFindings, parsed...)
 			if opts.Verbose {
 				fmt.Printf("  🔧 staticcheck: %s\n", staticcheckSummary(parsed))
+			}
+		}
+		// G3：govulncheck 依赖漏洞解析（exit 0=无漏洞 / 1=发现漏洞，其他=工具失败）
+		if cmd == "govulncheck -json ./..." && err == nil && (result.ExitCode == 0 || result.ExitCode == 1) {
+			parsed := parseGovulncheckOutput(result.Output)
+			c.toolFindings = append(c.toolFindings, parsed...)
+			if opts.Verbose {
+				fmt.Printf("  🔧 govulncheck: %s\n", govulncheckSummary(parsed))
 			}
 		}
 

@@ -16,7 +16,7 @@ FROM golang:1.21-alpine
 # 安装静态分析工具（版本固定：需与基础镜像 go1.21 兼容）
 RUN apk add --no-cache git && \
     CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.4.7 && \
-    CGO_ENABLED=0 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
+    CGO_ENABLED=0 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2 &&     CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.1.3
 
 # 创建非 root 用户
 RUN adduser -D -u 65532 reviewer
