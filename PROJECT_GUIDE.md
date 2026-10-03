@@ -776,6 +776,29 @@ rules:
 > - 🐛 **混合语言上传测试抓到真 bug（2026-10-03）**：`*.env` 后缀文件（mix.env/prod.env）被 DetectLanguage 返回 "env"——不在 isConfigLanguage 白名单 → GEN-001 静默跳过。原实现只识别名为 `.env*` 开头的文件。修复：ext == ".env" 也判 dotenv + isConfigLanguage 加 "env" 别名。这印证了模拟测试的价值：该 bug 在合成样本（名为 .env.production）上永远暴露不出来。
 > - ⏭ backlog：R4 按需 → C7 PR 机器人 → E8 云端多用户。
 
+#### M9 · 现有代码整查增强（v1.3 方向）▶ 计划已制定（2026-10-01，用户确认后开工）
+
+> **定位**：diff 模式审"变化"，整查模式审"现状"——两模式互补，共享同一条管线、同一套 17 条规则与采集边界，仅输入语义与置信分层不同。M8 已打通 repo_url 克隆整查与 `--files` 全文件语义，M9 把"整查"从能用做强：角色感知、依赖漏洞、聚合视图、性能护栏。**现有 diff/PR 检查行为零改变**（用户要求保留）。
+
+| 任务 | 产出 |
+|------|------|
+| G1 全量扫描开关 | repo_path 模式加 `full_scan`（API 参数 + UI 勾选 + CLI `--full-scan`）：全文件按新增行审查。复用 repourl.go 采集边界（抽为共享函数供 repo_url 与 G1 共用——跳过 vendor/node_modules/二进制、1MB/1000 上限）；D7 增量对比自动生效（同 input_path 上一次全量 → 新增/复发/已消失）；沙箱照常可选 |
+| G2 代码角色系统集成 | 以 `rules/coderole.go`（production/test/example 判定 + dampenFindingByRole 降噪骨架）为地基接入引擎：① 逐条 finding 按角色 dampen（test 角色的 ERR `_` 丢弃豁免——替代散落的 _test.go 特判；testdata 假密钥降级）；② 新增 config 角色（.env/yaml/ini → GEN-001 适用域，与 w1_rules.go 的 isConfigLanguage 合并）；③ coderole_test 补角色判定矩阵 |
+| G3 govulncheck 依赖漏洞检测 | 仿 review/staticcheck.go 模式：沙箱执行 `govulncheck -json ./...` → 解析为 findings（`source: tool:govulncheck`、severity 按符号影响分级）；**边界**：container 网络隔离拉不了漏洞库 → 仅 local/e2b 沙箱启用（e2b 有网络）；沙箱镜像 Dockerfile 补 govulncheck 安装；输出体积护栏 |
+| G4 整查聚合视图 | 整查模式报告加聚合段：按目录的发现密度、Top 风险文件排行、文件数/跳过数统计；UI 任务详情整查模式加"文件风险分布"分组（复用 D7 面板的分组样式）；MD/HTML 报告同步 |
+| G5 大仓库性能护栏 | 类型加载已按目录分组（D3）；补：采集/规则/类型三段耗时入 Monitor、超大仓库（>500 文件）分段进度上报、类型检查失败缓存（同包不重试） |
+
+**退出标准**：G1–G5 全部落地；四真实仓库 + 一个 ≥1000 文件仓库的整查回归（FP 不回升、耗时达标）；diff/PR 模式行为零改变（门禁 77+ 样本不回退）；13 包 -race 全绿。
+
+**顺序与工作量**：G1（S-M）→ G2（M）→ G3（M）→ G4（S-M）→ G5（S）；G3 依赖沙箱镜像更新，可与 G2 并行。
+
+**复用映射（按现有模块加强，不另起炉灶）**：
+- G1 ← review/repourl.go 采集边界 + repo_path 管线 + D7 增量
+- G2 ← rules/coderole.go（并行会话已建判定与降噪骨架）+ token_rules.go 散落的角色特判收敛
+- G3 ← review/staticcheck.go 解析模式 + sandbox/ 三后端 + M3 的 Dockerfile 沙箱镜像
+- G4 ← D7 增量面板分组样式 + report.Monitor 结构
+- G5 ← D3 按目录分组加载（已有）+ Monitor 计时字段
+
 机动缓冲：2026-11-12 → 11-25（顺延或做 backlog：B7/B8 skill-run/session 真用、C4/C5 Agent/Graph 编排、C7 PR 机器人、C10 prompt 迭代、D8 PatchView 语义层重构、React 重构、规则在线编辑器）。
 
 ### 7.3 扩展任务明细（A/B/C/D 层完整任务库）
@@ -862,6 +885,16 @@ rules:
 | F6 | HTML 单文件报告 | D6 落地：自包含、severity 筛选、六维图，可离线转发 | M |
 | F7 | Docker compose 部署 | 一条命令自部署 + TLS 反代说明 + 备份/升级文档 | S |
 | F8 | 服务语义修复 | P2-10（0 新增行 → 422 友好提示）/ P3-12（repo 不存在 → 400、`errors.Is`、Version 统一注入） | S |
+
+#### G 层：整查增强（M9 主战场，2026-10-01 规划）
+
+| # | 扩展项 | 说明 | 工作量 |
+|---|--------|------|--------|
+| G1 | 全量扫描开关 | repo_path 模式 full_scan 参数：全文件按新增行审查；采集边界与 repo_url 共用；D7 增量自动生效 | S-M |
+| G2 | 代码角色系统集成 | coderole.go 接入引擎：按 production/test/example/config 角色调整规则适用与置信度；收敛散落的 _test.go 特判 | M |
+| G3 | govulncheck 依赖漏洞检测 | 沙箱内运行官方 govulncheck -json，解析为 findings（source: tool:govulncheck）；container 需镜像预装/预刷漏洞库 | M |
+| G4 | 整查聚合视图 | 按目录发现密度、Top 风险文件、报告三格式同步 | S-M |
+| G5 | 大仓库性能护栏 | 三段耗时入 Monitor、分段进度、类型检查失败缓存 | S |
 
 #### W 层：智能化（M8 主战场，2026-09-28 规划）
 
