@@ -22,10 +22,15 @@ import (
 //   - 浅克隆 depth=1（只取目标快照，历史不拉取）
 //   - 跳过 vendored/构建产物目录与二进制文件
 //   - 文件数与单文件大小上限（超限给可读错误）
+//
+// 文件数上限按输入来源区分信任边界（M9-G5）：repo_url 是用户给的远端地址，
+// 爬取必须有硬护栏（1000）；本地仓库全量扫描是用户自己的目录、显式勾选，
+// 放宽到 5000——可见性靠分段进度上报与三段耗时保障。
 const (
-	repoMaxFiles     = 1000
-	repoMaxFileBytes = 1 << 20 // 1MB/文件
-	cloneTimeout     = 5 * time.Minute
+	repoMaxFiles         = 1000
+	repoMaxFilesFullScan = 5000
+	repoMaxFileBytes     = 1 << 20 // 1MB/文件
+	cloneTimeout         = 5 * time.Minute
 )
 
 var repoSkipDirs = map[string]bool{
@@ -93,6 +98,33 @@ func redactToken(s string) string {
 	return s
 }
 
+// repoCollectStats 整查采集统计（M9-G4 聚合视图用）：审查覆盖面可解释——
+// 跳过了哪些文件、什么原因，而不是一个黑盒数字。
+type repoCollectStats struct {
+	skipped map[string]int // 原因 → 数量（binary/oversized/unreadable/symlink/skipdir）
+	total   int
+}
+
+func (s *repoCollectStats) skip(reason string) {
+	if s == nil {
+		return
+	}
+	if s.skipped == nil {
+		s.skipped = map[string]int{}
+	}
+	s.skipped[reason]++
+	s.total++
+}
+
+// collectProgressInterval 大仓库采集分段进度间隔（M9-G5）：每采集 N 个文件
+// 上报一次进度，让"整查在跑"对用户可见，而不是像卡死。
+const collectProgressInterval = 500
+
+// collectProgress 采集进度上报（stdout 日志；异步模式下落服务端日志可查）。
+func collectProgress(collected int) {
+	fmt.Printf("📦 采集进度: %d 文件…\n", collected)
+}
+
 // readFullRepoFiles 收集仓库全部文本文件（跳过 vendored/二进制/超大文件），
 // 整体按新增行审查（等价 --files 语义）。
 //
@@ -101,7 +133,11 @@ func redactToken(s string) string {
 //     requests tests/certs 里的 ca -> ../../expired/ca/）会被当普通文件
 //     采集，读取时 "is a directory" 直接拖垮整个审查；
 //   - 单个不可读文件跳过（fail-open）——采集边界内一个坏文件不应让整仓失败。
-func readFullRepoFiles(root string) ([]diff.FileDiff, error) {
+//
+// 返回的 repoCollectStats 记录跳过明细（M9-G4），供整查聚合展示；
+// onProgress 非空时每采集 collectProgressInterval 个文件回调一次（M9-G5）。
+func readFullRepoFiles(root string, maxFiles int, onProgress func(collected int)) ([]diff.FileDiff, *repoCollectStats, error) {
+	stats := &repoCollectStats{}
 	var paths []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -110,41 +146,53 @@ func readFullRepoFiles(root string) ([]diff.FileDiff, error) {
 		name := info.Name()
 		if info.IsDir() {
 			if repoSkipDirs[name] {
+				stats.skip("skipdir")
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		// 符号链接不采集（可指向目录或越界路径，审查按真实文件走）
 		if info.Mode()&os.ModeSymlink != 0 {
+			stats.skip("symlink")
 			return nil
 		}
-		if len(paths) >= repoMaxFiles {
-			return fmt.Errorf("仓库文件数超过上限 %d：请改用 PR 链接审查变更，或本地部署后用仓库路径模式", repoMaxFiles)
+		if len(paths) >= maxFiles {
+			return fmt.Errorf("仓库文件数超过上限 %d：请改用 PR 链接审查变更，或本地部署后用仓库路径模式", maxFiles)
 		}
 		if info.Size() > repoMaxFileBytes {
+			stats.skip("oversized")
 			return nil // 超大文件跳过
 		}
 		// 只读前 8KB 做二进制嗅探与可读性探测（不再整读文件）
 		head := make([]byte, 8000)
 		f, ferr := os.Open(path)
 		if ferr != nil {
+			stats.skip("unreadable")
 			return nil // 不可读文件跳过（fail-open）
 		}
 		n, _ := f.Read(head)
 		f.Close()
 		if bytes.IndexByte(head[:n], 0) >= 0 {
+			stats.skip("binary")
 			return nil // 前 8KB 含 NUL 视为二进制
 		}
 		paths = append(paths, path)
+		if onProgress != nil && len(paths)%collectProgressInterval == 0 {
+			onProgress(len(paths))
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("仓库中没有可审查的文本文件（空仓库或全为二进制/跳过目录）")
+		return nil, stats, fmt.Errorf("仓库中没有可审查的文本文件（空仓库或全为二进制/跳过目录）")
 	}
-	return diff.ReadFromFilePaths(paths)
+	files, err := diff.ReadFromFilePaths(paths)
+	if err != nil {
+		return nil, stats, err
+	}
+	return files, stats, nil
 }
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {

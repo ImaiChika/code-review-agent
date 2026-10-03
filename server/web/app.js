@@ -776,6 +776,36 @@ function incGroupHTML(label, color, list) {
   return `<div style="margin-bottom:12px"><b style="color:${color}">${label} ${n}</b>${items}</div>`;
 }
 
+/* 整查聚合（M9-G4）：跳过明细徽章 + 目录分布横条 + Top 风险文件 */
+const SKIP_LABEL = { binary: "二进制", oversized: "超大文件", unreadable: "不可读", symlink: "符号链接", skipdir: "跳过目录" };
+function dirDisp(d) { return d === "." ? "(根目录)" : d; }
+function repoScanHTML(agg) {
+  const skips = Object.entries(agg.skip_reasons || {}).map(([k, v]) =>
+    `<span class="badge info">${esc(SKIP_LABEL[k] || k)} ${v}</span>`).join(" ");
+  let html = skips ? `<div style="margin-bottom:12px"><span class="dim" style="font-size:12px">跳过明细：</span>${skips}</div>` : "";
+  const dirs = agg.by_directory || [];
+  if (dirs.length) {
+    const max = Math.max(...dirs.map(d => (d.findings || 0) + (d.warnings || 0)), 1);
+    html += dirs.map(d => {
+      const issues = (d.findings || 0) + (d.warnings || 0);
+      return `<div style="display:flex;gap:10px;align-items:center;padding:3px 0">
+        <span class="mono dim" style="width:180px;flex-shrink:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(dirDisp(d.dir))}">${esc(dirDisp(d.dir))}</span>
+        <span style="flex:1;height:8px;background:#f1f2f4;border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${(issues / max * 100).toFixed(1)}%;background:var(--accent);border-radius:99px"></span></span>
+        <span class="dim" style="width:170px;flex-shrink:0;font-size:12px">${issues} 问题 · ${d.files} 文件 · 密度 ${Number(d.density || 0).toFixed(2)}</span>
+      </div>`;
+    }).join("");
+  }
+  const tops = agg.top_files || [];
+  if (tops.length) {
+    html += `<div style="margin-top:12px;margin-bottom:4px"><b>Top 风险文件</b></div>` + tops.map(f => `
+      <div style="display:flex;gap:8px;align-items:baseline;padding:3px 0">
+        <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.file)}</span>
+        <span class="dim" style="font-size:12px;flex-shrink:0">发现 ${f.findings} · 警告 ${f.warnings}</span>
+      </div>`).join("");
+  }
+  return html || `<div class="empty">没有可聚合的分布数据</div>`;
+}
+
 /* ══════════════ 视图 04：任务详情 ══════════════ */
 let taskSevFilter = "all";
 
@@ -846,6 +876,11 @@ async function viewTask(taskID) {
       incGroupHTML("已消失", "var(--green)", rep.incremental.gone_findings),
       "与同仓库上一次审查的对比：新增=这次才出现；复发=上次也有；已消失=上次有这次没有（已修复或代码移除）")}` : ""}
 
+    ${rep.repo_scan ? `<div style="height:14px"></div>
+    ${panel(`文件风险分布 · 采集 ${rep.repo_scan.files_collected} 个文件${rep.repo_scan.files_skipped ? ` · 跳过 ${rep.repo_scan.files_skipped}` : ""}`,
+      repoScanHTML(rep.repo_scan),
+      "整查模式的分布视角：目录条越长说明该目录问题越集中，密度是平均每个文件的问题数；Top 风险文件按严重级加权排行")}` : ""}
+
     <div style="height:14px"></div>
 
     ${panel("发现", `<div class="chips" id="sev-filter">
@@ -875,6 +910,8 @@ async function viewTask(taskID) {
           <span class="k">审查引擎</span><span class="v">${rep.skill && rep.skill.loaded ? `${esc(rep.skill.name)} ${esc(rep.skill.version)}` : "内置规则引擎"}</span>
           <span class="k">沙箱命令</span><span class="v">${m.tool_call_count} 次</span>
           <span class="k">规则</span><span class="v">${m.rule_count} 条 · ${esc(m.rule_duration)}</span>
+          <span class="k">采集</span><span class="v">${esc(m.collect_duration || "-")}（${m.files_scanned} 个文件）</span>
+          ${m.type_load_duration ? `<span class="k">类型加载</span><span class="v">${esc(m.type_load_duration)}</span>` : ""}
           <span class="k">扫描文件</span><span class="v">${m.files_scanned} 个</span>
           <span class="k">报告归档</span><span class="v">入库 ${m.artifacts_saved} · 被拒 ${m.artifacts_rejected}</span>
           <span class="k">安全拦截</span><span class="v">${m.permission_denied} 次 · 异常 ${m.exception_count} 次</span>

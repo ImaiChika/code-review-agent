@@ -1034,6 +1034,40 @@ func auth() string {
 		t.Error("首次全量扫描不应有增量对比")
 	}
 
+	// M9-G4：全量扫描应产生整查聚合（目录分布 + Top 风险文件 + 采集统计）
+	if rep.RepoScan == nil {
+		t.Fatal("全量扫描应产生整查聚合 repo_scan")
+	}
+	if rep.RepoScan.FilesCollected < 2 { // app.go + go.mod
+		t.Errorf("采集文件数应包含 app.go 与 go.mod，实际 %d", rep.RepoScan.FilesCollected)
+	}
+	// .git 目录本身计入"跳过目录"；不应有二进制/超大等文件级跳过
+	for _, reason := range []string{"binary", "oversized", "unreadable", "symlink"} {
+		if rep.RepoScan.SkipReasons[reason] != 0 {
+			t.Errorf("全文本仓库不应有 %s 跳过: %v", reason, rep.RepoScan.SkipReasons)
+		}
+	}
+	if rep.RepoScan.FilesSkipped != rep.RepoScan.SkipReasons["skipdir"] {
+		t.Errorf("跳过总数应等于跳过目录数: skipped=%d reasons=%v", rep.RepoScan.FilesSkipped, rep.RepoScan.SkipReasons)
+	}
+	foundRootDir, foundAppInTop := false, false
+	for _, d := range rep.RepoScan.ByDirectory {
+		if d.Dir == "." && d.Files == rep.RepoScan.FilesCollected {
+			foundRootDir = true
+		}
+	}
+	for _, tf := range rep.RepoScan.TopFiles {
+		if strings.Contains(tf.File, "app.go") && tf.Findings >= 1 {
+			foundAppInTop = true
+		}
+	}
+	if !foundRootDir {
+		t.Errorf("目录分布应含根目录条目: %+v", rep.RepoScan.ByDirectory)
+	}
+	if !foundAppInTop {
+		t.Errorf("Top 风险文件应含检出密钥的 app.go: %+v", rep.RepoScan.TopFiles)
+	}
+
 	// 二次全量扫描（内容未变）→ 增量对比全部复发
 	rep2, err := Run(Options{
 		RepoPath:    dir,
@@ -1053,5 +1087,31 @@ func auth() string {
 	}
 	if len(rep2.Incremental.NewFindings) != 0 || len(rep2.Incremental.GoneFindings) != 0 {
 		t.Errorf("内容未变不应有新增/消失: %+v", rep2.Incremental)
+	}
+	if rep2.RepoScan == nil {
+		t.Error("二次全量扫描仍应产生整查聚合")
+	}
+}
+
+// TestRun_DiffModeNoRepoScan G4 对照：diff 模式审"变化"，文件粒度太细没有
+// 目录密度可言，不应产生整查聚合段。
+func TestRun_DiffModeNoRepoScan(t *testing.T) {
+	rep, err := Run(Options{
+		DiffContent: `diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,3 +1,4 @@
+ package main
++
++password := "hunter2-diffmode-v1"
+ `,
+		OutputDir:   t.TempDir(),
+		SandboxMode: SandboxOff,
+	})
+	if err != nil {
+		t.Fatalf("diff 模式审查失败: %v", err)
+	}
+	if rep.RepoScan != nil {
+		t.Errorf("diff 模式不应产生整查聚合: %+v", rep.RepoScan)
 	}
 }

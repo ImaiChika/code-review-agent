@@ -127,3 +127,59 @@ func TestLoadRepoTypes_FailOpen(t *testing.T) {
 		t.Error("文件不存在应返回 nil")
 	}
 }
+
+// TestLoadRepoTypes_FailCache M9-G5：类型检查失败的包不重试——同进程
+// 第二次加载命中缓存；修复代码后签名变化，重试成功。
+func TestLoadRepoTypes_FailCache(t *testing.T) {
+	dir := t.TempDir()
+	// 一个正常包目录（每次审查都重新解析，不进缓存——成功包不缓存防数据陈旧）
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "a.go"), []byte("package pkg\n\nfunc A() int { return 1 }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// 一个语法坏包目录（全部文件解析失败 → 记入失败缓存）
+	brokenDir := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(brokenDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	brokenFile := filepath.Join(brokenDir, "bad.go")
+	if err := os.WriteFile(brokenFile, []byte("package broken\nfunc (===\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 首次：broken 解析失败记入缓存，pkg 正常加载
+	rt := LoadRepoTypes(dir, []string{"pkg/a.go", "broken/bad.go"})
+	if rt == nil {
+		t.Fatal("正常包应产出类型信息")
+	}
+	if rt.DirsLoaded != 1 {
+		t.Errorf("首次应加载 1 个包目录，实际 %d", rt.DirsLoaded)
+	}
+	if rt.DirsCachedFailed != 0 {
+		t.Errorf("首次不应有缓存命中，实际 %d", rt.DirsCachedFailed)
+	}
+
+	// 二次：broken 同内容 → 命中缓存不重试
+	rt2 := LoadRepoTypes(dir, []string{"pkg/a.go", "broken/bad.go"})
+	if rt2 == nil {
+		t.Fatal("二次加载不应因坏包缓存而失败")
+	}
+	if rt2.DirsCachedFailed != 1 {
+		t.Errorf("二次应命中 1 个失败缓存，实际 %d", rt2.DirsCachedFailed)
+	}
+
+	// 修复 broken.go：签名变化 → 重试成功
+	if err := os.WriteFile(brokenFile, []byte("package broken\n\nfunc B() int { return 2 }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt3 := LoadRepoTypes(dir, []string{"pkg/a.go", "broken/bad.go"})
+	if rt3 == nil {
+		t.Fatal("修复后加载不应失败")
+	}
+	if rt3.DirsLoaded != 2 || rt3.DirsCachedFailed != 0 {
+		t.Errorf("修复后应重试成功（加载 2 个、缓存命中 0），实际 loaded=%d cached=%d",
+			rt3.DirsLoaded, rt3.DirsCachedFailed)
+	}
+}

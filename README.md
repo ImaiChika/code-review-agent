@@ -11,6 +11,7 @@
 - **SQLite 存储**：审查结果持久化，支持按任务查询
 - **安全过滤器**：命令执行前的安全检查 + 审计日志
 - **沙箱执行**：基于 trpc-agent-go 的 codeexecutor/local
+- **现有代码整查**（M9）：GitHub 链接免上传整体审查 / 本地仓库全量扫描；聚合视图按目录看风险密度与 Top 风险文件，govulncheck 依赖漏洞检测，大仓库分段进度与三段耗时护栏
 - **敏感信息脱敏**：自动检测并脱敏 10 种敏感信息类型
 
 ## 快速开始
@@ -44,10 +45,14 @@ go build -o code-review-agent .
 # 审查文件路径列表（M2-D5：整体按新增行审查，适合新文件/CI 指定文件）
 ./code-review-agent --files "a.go,b.go"
 
-# 审查 git 仓库变更
+# 审查 git 仓库变更（仅未提交变更）
 ./code-review-agent --repo-path /path/to/repo
 
-# 审查 GitHub 仓库（Web 界面「GitHub 仓库」标签，或 API 模式）
+# 全量扫描仓库现状（--full-scan：全部文件按新增行审查，不止未提交变更）
+./code-review-agent --repo-path /path/to/repo --full-scan
+
+# 审查 GitHub 仓库（无需上传代码，自动浅克隆整体审查；CLI 或 Web 界面均可）
+./code-review-agent --repo-url github.com/owner/repo
 curl -X POST http://localhost:8080/api/reviews -d '{"repo_url":"https://github.com/owner/repo"}'
 
 # 启动 HTTP 服务（Web 前端 + REST API，等价于 scripts/start.sh）
@@ -72,6 +77,9 @@ curl -X POST http://localhost:8080/api/reviews -d '{"repo_url":"https://github.c
 |------|--------|------|
 | `--diff-file` | - | diff 文件路径 |
 | `--repo-path` | - | git 仓库路径 |
+| `--full-scan` | false | 仓库路径模式全量扫描（M9-G1：全部文件按新增行审查，含已提交内容） |
+| `--repo-url` | - | GitHub 仓库链接（`github.com/owner/repo` 等形态，自动浅克隆整体审查，M8） |
+| `--repo-ref` | - | 配合 `--repo-url`：分支/tag/commit（缺省 = 默认分支） |
 | `--rules-dir` | - | 自定义 YAML 规则目录 |
 | `--db` | `review.db` | SQLite 数据库路径 |
 | `--output` | `.` | 报告输出目录（不存在会自动创建） |

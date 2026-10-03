@@ -776,7 +776,10 @@ rules:
 > - 🐛 **混合语言上传测试抓到真 bug（2026-10-03）**：`*.env` 后缀文件（mix.env/prod.env）被 DetectLanguage 返回 "env"——不在 isConfigLanguage 白名单 → GEN-001 静默跳过。原实现只识别名为 `.env*` 开头的文件。修复：ext == ".env" 也判 dotenv + isConfigLanguage 加 "env" 别名。这印证了模拟测试的价值：该 bug 在合成样本（名为 .env.production）上永远暴露不出来。
 > - ✅ **G1 全量扫描开关完成（2026-10-03，M9 首项）**：repo 模式 `FullScan`——全部文件按新增行审查（不止未提交变更），`input_path` 带 `@full` 后缀与 diff 模式基准分离（D7 各自对比）；采集边界与 repo_url 共用（readFullRepoFiles + relativizeFiles 抽为共享函数）。server `full_scan` 参数、CLI `--full-scan`、UI 仓库路径 tab 勾选（含大仓库建议）。测试：review 集成 +1（已提交密钥全量检出 + 二次扫描全复发 + 首扫无增量）；13 包 -race 全绿；线上冒烟 ✓（自建仓库已提交密钥检出）。**遗留注记**：server 侧 InputLabel 覆盖 input_path 时 @full 后缀被抹平（diff/full 共享基准）——语义可接受但记录在案。
 > - ✅ **G3 govulncheck 依赖漏洞检测完成（2026-10-04，M9 第三项）**：`review/govulncheck.go`——govulncheck -json 流式解析（JSON decoder 逐条，非 JSON 行忽略；OSV 条目 → findings，severity low/quality 分类不参与评分，evidence 携带 CVE 别名）；沙箱命令表加 `govulncheck -json ./...`（exit 0/1 解析，其他=工具失败同 staticcheck 纪律）；Dockerfile 沙箱镜像补装 govulncheck@v1.1.3（版本固定）。**边界**：漏洞库需网络——container 网络隔离下优雅跳过，local/e2b 可用。测试：解析单测 +2（流式解析/垃圾输入容错）；otel span 计数断言随命令表 3→4 更新；13 包 -race 全绿；门禁 77 样本不回退。
-> - ⏭ M9 剩余：G4 整查聚合视图 → G5 性能护栏 → 收尾。
+> - ✅ **G4 整查聚合视图完成（2026-10-04，M9 第四项）**：报告新增 `repo_scan` 聚合段（仅 repo_url/full_scan 整查模式产生，diff 模式为 nil）——`report.BuildRepoScanAgg` 按目录统计（问题数 Top 20，密度 = (发现+警告)/文件数）+ Top 风险文件排行（Top 10，权重 = 发现按严重级加权 high 5/medium 3/low 2/info 1 + 警告×1，高危集中文件排前而不是被 info 刷屏）；采集跳过明细可解释（binary/oversized/unreadable/symlink/skipdir 五类计数，repourl.go 采集函数返回 repoCollectStats）。三格式同步：JSON `repo_scan` 字段、Markdown「整查聚合」节、HTML「文件风险分布」卡（复用六维横条样式）；UI 任务详情整查模式同面板（复用 D7 面板分组样式，浏览器截图验证）。测试：report 单测 +4（目录归并/密度/加权排序/容量截断/清单外路径兜底/三格式含与省略）+ review 集成 +2（全量扫描聚合断言、diff 模式无聚合对照）；门禁 77 样本不回退。
+> - ✅ **G5 大仓库性能护栏完成（2026-10-04，M9 第五项）**：① Monitor 新增采集/类型两段耗时（`collect_duration`/`type_load_duration`，与既有 rule_duration 凑齐三段），MD 报告与 UI 执行统计面板同步；② 大仓库分段进度——采集每过 500 文件上报一次（stdout/服务端日志），repo_url 上限 1000 不变，本地 full_scan 上限按信任边界放宽到 5000（repo_url 是远端地址要防爬取失控；本地是用户自己的目录显式勾选，可见性靠进度上报保障——修复了"≥1000 文件仓库整查"退出标准与 1000 硬上限的冲突）；③ 类型检查失败缓存——`analyzer.typeFailCache` 进程级"同包不重试"，防陈旧钥匙是目录内容签名（.go 文件名+大小+modtime），签名一致且上次失败才跳过，只缓存失败不缓存成功（成功包缓存 AST 有数据陈旧风险），`RepoTypes.DirsLoaded/DirsCachedFailed` 可观测。测试：analyzer 单测 +1（失败缓存命中/修复后签名变化重试）、repourl 单测 +2（进度回调 600 文件恰好 1 次@500、上限信任边界）；13 包 -race 全绿。
+> - ✅ **M9 退出标准回归（2026-10-04）**：真实仓库 cobra 整查 2 中危风险 9（A）、gin 整查 3 中危风险 9（A）——FP 不回升；合成 ≥1000 文件仓库（1095 文件 33 目录，预置 3 个密钥 + 坏语法包 + 二进制 + 符号链接 + vendor）全量扫描：进度上报 500/1000 触发、恰好命中 3 个预置密钥零误报、总耗时 170ms（二次 116ms、增量全部复发）、三段耗时入报告、目录分布截断 Top 20、跳过明细 binary/symlink/skipdir 各 1；diff 模式零改变（门禁 77 样本 100%/100%/0%）；服务端 API 全链路 + 浏览器 UI 截图验证（面板渲染/无 JS 错误）。测试痕迹已清理（DB 冒烟任务/临时克隆仓库），cr_settings 密钥配置保留。版本 1.2.0 → 1.3.0。
+> - ⏭ M9 收尾：文档同步 → 提交 → tag v1.3.0。
 
 #### M9 · 现有代码整查增强（v1.3 方向）▶ 计划已制定（2026-10-01，用户确认后开工）
 
@@ -787,8 +790,8 @@ rules:
 | G1 全量扫描开关 | repo_path 模式加 `full_scan`（API 参数 + UI 勾选 + CLI `--full-scan`）：全文件按新增行审查。复用 repourl.go 采集边界（抽为共享函数供 repo_url 与 G1 共用——跳过 vendor/node_modules/二进制、1MB/1000 上限）；D7 增量对比自动生效（同 input_path 上一次全量 → 新增/复发/已消失）；沙箱照常可选 |
 | G2 代码角色系统集成 | 以 `rules/coderole.go`（production/test/example 判定 + dampenFindingByRole 降噪骨架）为地基接入引擎：① 逐条 finding 按角色 dampen（test 角色的 ERR `_` 丢弃豁免——替代散落的 _test.go 特判；testdata 假密钥降级）；② 新增 config 角色（.env/yaml/ini → GEN-001 适用域，与 w1_rules.go 的 isConfigLanguage 合并）；③ coderole_test 补角色判定矩阵 |
 | G3 govulncheck 依赖漏洞检测 | 仿 review/staticcheck.go 模式：沙箱执行 `govulncheck -json ./...` → 解析为 findings（`source: tool:govulncheck`、severity 按符号影响分级）；**边界**：container 网络隔离拉不了漏洞库 → 仅 local/e2b 沙箱启用（e2b 有网络）；沙箱镜像 Dockerfile 补 govulncheck 安装；输出体积护栏 |
-| G4 整查聚合视图 | 整查模式报告加聚合段：按目录的发现密度、Top 风险文件排行、文件数/跳过数统计；UI 任务详情整查模式加"文件风险分布"分组（复用 D7 面板的分组样式）；MD/HTML 报告同步 |
-| G5 大仓库性能护栏 | 类型加载已按目录分组（D3）；补：采集/规则/类型三段耗时入 Monitor、超大仓库（>500 文件）分段进度上报、类型检查失败缓存（同包不重试） |
+| G4 整查聚合视图 ✅ | 整查模式报告加聚合段：按目录的发现密度、Top 风险文件排行、文件数/跳过数统计；UI 任务详情整查模式加"文件风险分布"分组（复用 D7 面板的分组样式）；MD/HTML 报告同步 |
+| G5 大仓库性能护栏 ✅ | 类型加载已按目录分组（D3）；补：采集/规则/类型三段耗时入 Monitor、超大仓库（>500 文件）分段进度上报、类型检查失败缓存（同包不重试） |
 
 **退出标准**：G1–G5 全部落地；四真实仓库 + 一个 ≥1000 文件仓库的整查回归（FP 不回升、耗时达标）；diff/PR 模式行为零改变（门禁 77+ 样本不回退）；13 包 -race 全绿。
 

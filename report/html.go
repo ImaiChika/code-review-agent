@@ -28,6 +28,7 @@ func (rep *ReviewReport) ToHTML() string {
 	b.WriteString(htmlHead(rep))
 	b.WriteString(htmlSummary(rep))
 	b.WriteString(htmlDimensions(rep))
+	b.WriteString(htmlRepoScan(rep))
 	b.WriteString(htmlFindings(rep))
 	b.WriteString(htmlFooter(rep))
 	return b.String()
@@ -183,6 +184,67 @@ func htmlDimensions(rep *ReviewReport) string {
   <div class="bar-num">` + fmt.Sprintf("%.0f 分 · 权重 %.0f%%", r.score, r.weight*100) + `</div>
 </div>`)
 	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// htmlRepoScan 整查聚合卡（M9-G4：仅整查模式产生，其余模式整块省略）。
+// 目录分布复用六维评分的横条样式，条长 = 该目录问题数占比。
+func htmlRepoScan(rep *ReviewReport) string {
+	agg := rep.RepoScan
+	if agg == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="card"><div class="meta" style="margin-bottom:12px"><b style="color:var(--ink)">文件风险分布</b> · 采集 ` +
+		fmt.Sprintf("%d", agg.FilesCollected) + ` 个文件`)
+	if agg.FilesSkipped > 0 {
+		b.WriteString(fmt.Sprintf(` · 跳过 <b>%d</b>`, agg.FilesSkipped))
+		if len(agg.SkipReasons) > 0 {
+			keys := make([]string, 0, len(agg.SkipReasons))
+			for k := range agg.SkipReasons {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				b.WriteString(fmt.Sprintf(` <span class="badge b-info">%s %d</span>`,
+					html.EscapeString(skipReasonLabel(k)), agg.SkipReasons[k]))
+			}
+		}
+	}
+	b.WriteString(`</div>`)
+
+	if len(agg.ByDirectory) > 0 {
+		maxIssues := 1
+		for _, d := range agg.ByDirectory {
+			if n := d.Findings + d.Warnings; n > maxIssues {
+				maxIssues = n
+			}
+		}
+		b.WriteString(`<div class="meta" style="margin-bottom:8px">目录分布（按问题数排序）</div>`)
+		for _, d := range agg.ByDirectory {
+			issues := d.Findings + d.Warnings
+			pct := float64(issues) / float64(maxIssues) * 100
+			b.WriteString(`<div class="bar-row">
+  <div class="bar-label" style="width:170px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="` +
+				html.EscapeString(dirDisplay(d.Dir)) + `">` + html.EscapeString(dirDisplay(d.Dir)) + `</div>
+  <div class="bar-track"><div class="bar-fill" style="width:` + fmt.Sprintf("%.1f", pct) + `%"></div></div>
+  <div class="bar-num">` + fmt.Sprintf("%d 问题 · %d 文件", issues, d.Files) + `</div>
+</div>`)
+		}
+	}
+
+	if len(agg.TopFiles) > 0 {
+		b.WriteString(`<div class="meta" style="margin:12px 0 8px">Top 风险文件</div>`)
+		for _, f := range agg.TopFiles {
+			b.WriteString(`<div class="bar-row">
+  <div class="bar-label" style="width:220px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="` +
+				html.EscapeString(f.File) + `">` + html.EscapeString(f.File) + `</div>
+  <div class="bar-num" style="width:auto">发现 <b>` + fmt.Sprintf("%d", f.Findings) + `</b> · 警告 ` + fmt.Sprintf("%d", f.Warnings) + `</div>
+</div>`)
+		}
+	}
+
 	b.WriteString(`</div>`)
 	return b.String()
 }

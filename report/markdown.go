@@ -70,6 +70,38 @@ func generateMarkdown(r *ReviewReport) string {
 		b.WriteString("\n")
 	}
 
+	// 整查聚合（M9-G4：仅 repo_url / full_scan 整查模式产生）
+	if r.RepoScan != nil {
+		b.WriteString("### 整查聚合\n\n")
+		if r.RepoScan.FilesSkipped > 0 {
+			b.WriteString(fmt.Sprintf("- **采集文件**: %d（跳过 %d", r.RepoScan.FilesCollected, r.RepoScan.FilesSkipped))
+			for _, k := range sortedSkipReasons(r.RepoScan.SkipReasons) {
+				b.WriteString(fmt.Sprintf("，%s %d", skipReasonLabel(k), r.RepoScan.SkipReasons[k]))
+			}
+			b.WriteString("）\n")
+		} else {
+			b.WriteString(fmt.Sprintf("- **采集文件**: %d（无跳过）\n", r.RepoScan.FilesCollected))
+		}
+		if len(r.RepoScan.ByDirectory) > 0 {
+			b.WriteString("\n目录分布（按问题数排序，密度 = 每文件平均问题数）：\n\n")
+			b.WriteString("| 目录 | 文件 | 发现 | 警告 | 密度 |\n")
+			b.WriteString("|------|------|------|------|------|\n")
+			for _, d := range r.RepoScan.ByDirectory {
+				b.WriteString(fmt.Sprintf("| `%s` | %d | %d | %d | %.2f |\n",
+					dirDisplay(d.Dir), d.Files, d.Findings, d.Warnings, d.Density))
+			}
+		}
+		if len(r.RepoScan.TopFiles) > 0 {
+			b.WriteString("\nTop 风险文件：\n\n")
+			b.WriteString("| 文件 | 发现 | 警告 |\n")
+			b.WriteString("|------|------|------|\n")
+			for _, f := range r.RepoScan.TopFiles {
+				b.WriteString(fmt.Sprintf("| `%s` | %d | %d |\n", f.File, f.Findings, f.Warnings))
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	// 高置信度发现详情
 	if len(r.Findings) > 0 {
 		b.WriteString("## 审查发现\n\n")
@@ -147,7 +179,11 @@ func generateMarkdown(r *ReviewReport) string {
 	// 监控指标
 	b.WriteString("## 监控指标\n\n")
 	b.WriteString(fmt.Sprintf("- **总耗时**: %s\n", r.Monitor.TotalDuration))
+	b.WriteString(fmt.Sprintf("- **采集耗时**: %s\n", r.Monitor.CollectDuration))
 	b.WriteString(fmt.Sprintf("- **规则执行耗时**: %s\n", r.Monitor.RuleDuration))
+	if r.Monitor.TypeLoadDuration != "" {
+		b.WriteString(fmt.Sprintf("- **类型加载耗时**: %s\n", r.Monitor.TypeLoadDuration))
+	}
 	b.WriteString(fmt.Sprintf("- **沙箱执行耗时**: %s\n", r.Monitor.SandboxDuration))
 	b.WriteString(fmt.Sprintf("- **扫描文件数**: %d\n", r.Monitor.FilesScanned))
 	b.WriteString(fmt.Sprintf("- **规则数量**: %d\n", r.Monitor.RuleCount))
@@ -206,4 +242,39 @@ func severityIcon(sev string) string {
 	default:
 		return sev
 	}
+}
+
+// sortedSkipReasons 跳过原因的稳定排序（报告输出确定性）。
+func sortedSkipReasons(m map[string]int) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// skipReasonLabel 跳过原因的用户可读名称。
+func skipReasonLabel(k string) string {
+	switch k {
+	case "binary":
+		return "二进制"
+	case "oversized":
+		return "超大文件"
+	case "unreadable":
+		return "不可读"
+	case "symlink":
+		return "符号链接"
+	case "skipdir":
+		return "跳过目录"
+	}
+	return k
+}
+
+// dirDisplay 目录的用户可读名称（根目录 "." 对用户无意义）。
+func dirDisplay(d string) string {
+	if d == "." {
+		return "(根目录)"
+	}
+	return d
 }

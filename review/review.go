@@ -197,8 +197,11 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	}
 
 	// ========== Step 1: 读取 diff ==========
+	// M9-G5：采集段计时（大仓库性能护栏——三段耗时入 Monitor）
+	collectStart := time.Now()
 	var files []diff.FileDiff
 	var inputType, inputPath string
+	var collectStats *repoCollectStats // M9-G4：整查采集统计（跳过明细）
 
 	switch {
 	case opts.DiffFile != "":
@@ -244,9 +247,10 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 		inputPath = opts.RepoPath
 		var err error
 		if opts.FullScan {
-			// M9-G1：全量扫描——仓库全部文件按新增行审查（不止未提交变更）
+			// M9-G1：全量扫描——仓库全部文件按新增行审查（不止未提交变更）。
+			// 本地目录是用户自己的仓库，采集上限放宽（M9-G5 信任边界区分）
 			inputPath += "@full"
-			files, err = readFullRepoFiles(opts.RepoPath)
+			files, collectStats, err = readFullRepoFiles(opts.RepoPath, repoMaxFilesFullScan, collectProgress)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 			}
@@ -256,7 +260,7 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 			// input_path 取仓库 URL（增量对比按同一 URL 聚焦）
 			inputType = "repo_url"
 			inputPath = opts.RepoURL
-			files, err = readFullRepoFiles(opts.RepoPath)
+			files, collectStats, err = readFullRepoFiles(opts.RepoPath, repoMaxFiles, collectProgress)
 			if err == nil {
 				// 路径相对化：克隆目录是随机的临时路径，增量匹配与展示都以
 				// 仓库内相对路径为准（两轮目录不同，绝对路径必然失配）
@@ -292,8 +296,9 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	}
 
 	goFiles := diff.ChangedGoFiles(files)
+	collectDuration := time.Since(collectStart)
 	if opts.Verbose {
-		fmt.Printf("📄 变更文件: %d 个（其中 Go 文件 %d 个）\n", len(files), len(goFiles))
+		fmt.Printf("📄 变更文件: %d 个（其中 Go 文件 %d 个）· 采集耗时 %s\n", len(files), len(goFiles), collectDuration.Round(time.Millisecond))
 	}
 
 	// ========== Step 2: 初始化规则引擎 ==========
@@ -331,15 +336,27 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	}
 
 	// D3：repo 模式加载类型信息（go/types，fail-open）——ERR/RES 规则"从猜变知道"
+	// M9-G5：类型加载段计时 + 失败包缓存（同包不重试）
+	var typeLoadDuration time.Duration
+	var typeCachedSkips int
 	if opts.RepoPath != "" {
 		rels := make([]string, 0, len(files))
 		for _, f := range files {
 			rels = append(rels, f.NewPath)
 		}
-		if rt := analyzer.LoadRepoTypes(opts.RepoPath, rels); rt != nil {
+		typeStart := time.Now()
+		rt := analyzer.LoadRepoTypes(opts.RepoPath, rels)
+		typeLoadDuration = time.Since(typeStart)
+		if rt != nil {
 			engine.SetRepoTypes(rt)
+			typeCachedSkips = rt.DirsCachedFailed
 			if opts.Verbose {
-				fmt.Printf("🧬 类型信息: 已加载 %d 个变更文件的包类型（go/types）\n", len(rels))
+				cachedNote := ""
+				if typeCachedSkips > 0 {
+					cachedNote = fmt.Sprintf("，失败包缓存跳过 %d 个", typeCachedSkips)
+				}
+				fmt.Printf("🧬 类型信息: 已加载 %d 个变更文件的包类型（go/types，耗时 %s%s）\n",
+					len(rels), typeLoadDuration.Round(time.Millisecond), cachedNote)
 			}
 		} else if opts.Verbose {
 			fmt.Println("🧬 类型信息: 不可用（非 Go module 或解析失败），规则退回词法行为")
@@ -465,9 +482,26 @@ func Run(opts Options) (reviewReport *report.ReviewReport, err error) {
 	reviewReport = report.NewReport(taskID, inputType, inputPath)
 	reviewReport.SetResult(dedupResult, len(files), len(goFiles))
 
+	// M9-G4：整查模式聚合视图（repo_url / full_scan）——按目录密度与
+	// Top 风险文件给出风险集中区；diff 模式不产生该段。
+	if opts.FullScan || opts.RepoURL != "" {
+		paths := make([]string, len(files))
+		for i := range files {
+			paths[i] = files[i].NewPath
+		}
+		agg := report.BuildRepoScanAgg(paths, dedupResult.Findings, dedupResult.Warnings)
+		if collectStats != nil {
+			agg.FilesSkipped = collectStats.total
+			agg.SkipReasons = collectStats.skipped
+		}
+		reviewReport.RepoScan = agg
+	}
+
 	// 填充监控信息
 	reviewReport.Monitor.TotalDuration = time.Since(start).Round(time.Millisecond).String()
-	reviewReport.Monitor.RuleDuration = ruleDuration.Round(time.Millisecond).String()
+	reviewReport.Monitor.CollectDuration = collectDuration.Round(time.Millisecond).String()   // M9-G5
+	reviewReport.Monitor.RuleDuration = ruleDuration.Round(time.Millisecond).String()         // M9-G5
+	reviewReport.Monitor.TypeLoadDuration = typeLoadDuration.Round(time.Millisecond).String() // M9-G5
 	reviewReport.Monitor.SandboxDuration = counters.sandboxDuration.Round(time.Millisecond).String()
 	// 工具调用次数 = 沙箱实际执行的命令数（此前误用 findings 数，语义失真）
 	reviewReport.Monitor.ToolCallCount = len(counters.sandboxRuns)

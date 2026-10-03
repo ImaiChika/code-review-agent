@@ -6,14 +6,17 @@
 package analyzer
 
 import (
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ========== D3：repo 模式类型信息加载器 ==========
@@ -36,7 +39,19 @@ type RepoTypes struct {
 	fset     *token.FileSet
 	files    map[string]*ast.File   // 绝对路径 → AST
 	infos    map[string]*types.Info // 绝对路径 → 所在包的类型信息
+
+	DirsLoaded       int // 成功加载的包目录数（M9-G5 可观测）
+	DirsCachedFailed int // 命中失败缓存跳过的包目录数（M9-G5 可观测）
 }
+
+// typeFailCache 进程级类型检查失败缓存（M9-G5，"同包不重试"）：
+// 类型检查失败（整个包解析不出任何文件）的目录记入缓存，同一进程内
+// 再次审查同一仓库时直接跳过，不为已知坏包重复付出解析+类型检查成本。
+//
+// 防陈旧：缓存值是目录内容签名（.go 文件名+大小+modtime），签名一致才跳过；
+// 代码一旦修改签名变化，下次照常重试。缓存只记失败不记成功——
+// 成功加载的包会产出真实 AST/类型数据，沿用进程内缓存反而引入数据陈旧风险。
+var typeFailCache sync.Map
 
 var closerIface = types.NewInterfaceType([]*types.Func{
 	types.NewFunc(token.NoPos, nil, "Close", types.NewSignature(nil,
@@ -69,7 +84,17 @@ func LoadRepoTypes(repoPath string, relFilePaths []string) *RepoTypes {
 	}
 
 	for dir, absPaths := range dirFiles {
-		rt.loadPackageDir(dir, absPaths)
+		sig := dirSignature(dir)
+		if cached, ok := typeFailCache.Load(dir); ok && cached.(string) == sig {
+			rt.DirsCachedFailed++ // 同包同内容且上次失败——不重试（M9-G5）
+			continue
+		}
+		if rt.loadPackageDir(dir, absPaths) {
+			rt.DirsLoaded++
+			typeFailCache.Delete(dir) // 上次失败这次内容变了且成功——清出缓存
+		} else {
+			typeFailCache.Store(dir, sig)
+		}
 	}
 	if len(rt.files) == 0 {
 		return nil
@@ -78,7 +103,8 @@ func LoadRepoTypes(repoPath string, relFilePaths []string) *RepoTypes {
 }
 
 // loadPackageDir 解析并类型检查一个包目录（失败静默降级）。
-func (rt *RepoTypes) loadPackageDir(dir string, absPaths []string) {
+// 返回是否产出至少一个可用的 AST 文件——全解析失败返回 false（记入失败缓存）。
+func (rt *RepoTypes) loadPackageDir(dir string, absPaths []string) bool {
 	var files []*ast.File
 	for _, abs := range absPaths {
 		f, err := parser.ParseFile(rt.fset, abs, nil, parser.SkipObjectResolution)
@@ -88,7 +114,7 @@ func (rt *RepoTypes) loadPackageDir(dir string, absPaths []string) {
 		files = append(files, f)
 	}
 	if len(files) == 0 {
-		return
+		return false
 	}
 
 	// 补齐同包其余 .go 文件（类型检查需要完整包视图）
@@ -126,6 +152,28 @@ func (rt *RepoTypes) loadPackageDir(dir string, absPaths []string) {
 		rt.files[abs] = f
 		rt.infos[abs] = info
 	}
+	return true
+}
+
+// dirSignature 包目录的内容签名（.go 文件名+大小+modtime），
+// 作为失败缓存的防陈旧钥匙：内容变了签名就变，下次照常重试。
+func dirSignature(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "unreadable"
+	}
+	h := fnv.New64a()
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".go" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(h, "%s|%d|%d|", e.Name(), info.Size(), info.ModTime().UnixNano())
+	}
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // assignmentAt 定位 file:line 上的赋值语句（返回语句的 LHS 表达式与 RHS）。

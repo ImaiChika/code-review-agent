@@ -7,6 +7,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -269,5 +270,150 @@ func TestToHTML_HTMLCape(t *testing.T) {
 	}
 	if strings.Contains(h, `<img src=x`) {
 		t.Error("evidence 必须被转义（无原始 img 标签）")
+	}
+}
+
+// ========== M9-G4：整查聚合 ==========
+
+// TestBuildRepoScanAgg 聚合构造：目录归并、密度计算、严重级加权排序。
+func TestBuildRepoScanAgg(t *testing.T) {
+	paths := []string{
+		"internal/server/a.go", "internal/server/b.go", "internal/server/c.go",
+		"internal/rules/x.go",
+		"main.go",
+	}
+	fs := []findings.Finding{
+		{Severity: findings.SeverityHigh, File: "internal/server/a.go"},
+		// b.go：high(5)+low(2)=权重 7，应压过 a.go 的单条 high(5)
+		{Severity: findings.SeverityHigh, File: "internal/server/b.go"},
+		{Severity: findings.SeverityLow, File: "internal/server/b.go"},
+		{Severity: findings.SeverityInfo, File: "internal/rules/x.go"},
+	}
+	ws := []findings.Finding{
+		{Severity: findings.SeverityLow, File: "internal/server/c.go"},
+	}
+
+	agg := BuildRepoScanAgg(paths, fs, ws)
+	if agg.FilesCollected != 5 {
+		t.Errorf("FilesCollected = %d, 期望 5", agg.FilesCollected)
+	}
+	if len(agg.ByDirectory) != 3 {
+		t.Fatalf("目录数 = %d, 期望 3: %+v", len(agg.ByDirectory), agg.ByDirectory)
+	}
+	// internal/server：3 发现 + 1 警告 = 4 问题 / 3 文件 → 排第一，密度 1.33
+	first := agg.ByDirectory[0]
+	if first.Dir != "internal/server" {
+		t.Errorf("问题最多的目录应排第一，实际 %s", first.Dir)
+	}
+	if first.Findings != 3 || first.Warnings != 1 {
+		t.Errorf("internal/server 统计错误: findings=%d warnings=%d", first.Findings, first.Warnings)
+	}
+	if first.Density < 1.32 || first.Density > 1.34 {
+		t.Errorf("密度 = %v, 期望 1.33", first.Density)
+	}
+	// Top 文件：b.go（high 5 + low 2 = 权重 7）应压过 a.go 的单条 high（5）
+	if len(agg.TopFiles) == 0 || agg.TopFiles[0].File != "internal/server/b.go" {
+		t.Errorf("b.go 应排 Top 第一: %+v", agg.TopFiles)
+	}
+	if agg.TopFiles[0].Findings != 2 || agg.TopFiles[0].Weight != 7 {
+		t.Errorf("b.go 统计错误: %+v", agg.TopFiles[0])
+	}
+	if len(agg.TopFiles) < 2 || agg.TopFiles[1].File != "internal/server/a.go" || agg.TopFiles[1].Weight != 5 {
+		t.Errorf("a.go 应排第二（权重 5）: %+v", agg.TopFiles)
+	}
+}
+
+// TestBuildRepoScanAgg_Caps 容量上限：目录 >20 / 文件 >10 时截断，不刷屏。
+func TestBuildRepoScanAgg_Caps(t *testing.T) {
+	var paths []string
+	var fs []findings.Finding
+	for i := 0; i < 30; i++ {
+		d := fmt.Sprintf("dir%02d", i)
+		paths = append(paths, d+"/f.go")
+		fs = append(fs, findings.Finding{Severity: findings.SeverityHigh, File: d + "/f.go"})
+	}
+	agg := BuildRepoScanAgg(paths, fs, nil)
+	if len(agg.ByDirectory) != aggMaxDirs {
+		t.Errorf("目录应截断到 %d，实际 %d", aggMaxDirs, len(agg.ByDirectory))
+	}
+	if len(agg.TopFiles) != aggMaxTopFiles {
+		t.Errorf("Top 文件应截断到 %d，实际 %d", aggMaxTopFiles, len(agg.TopFiles))
+	}
+	// 权重相同时按名字排序保证确定性：dir00 应在目录列表里
+	if agg.ByDirectory[0].Dir != "dir00" {
+		t.Errorf("同权重应按目录名排序，实际 %s", agg.ByDirectory[0].Dir)
+	}
+}
+
+// TestBuildRepoScanAgg_OutOfList findings 路径不在采集清单里（如沙箱工具
+// 产出路径）也参与统计，且文件数为 0 时密度不除零。
+func TestBuildRepoScanAgg_OutOfList(t *testing.T) {
+	fs := []findings.Finding{
+		{Severity: findings.SeverityHigh, File: "vendor/extra/tool.go"},
+	}
+	agg := BuildRepoScanAgg([]string{"main.go"}, fs, nil)
+	if len(agg.ByDirectory) != 2 {
+		t.Fatalf("目录数 = %d, 期望 2（main.go 根目录 + vendor/extra）", len(agg.ByDirectory))
+	}
+	for _, d := range agg.ByDirectory {
+		if d.Dir == "vendor/extra" && (d.Files != 1 || d.Density != 1) {
+			t.Errorf("清单外目录密度应按 1 文件兜底: %+v", d)
+		}
+	}
+}
+
+// TestRepoScanReportSections 聚合段三格式同步：JSON 带 repo_scan、
+// Markdown 有整查聚合、HTML 有文件风险分布；diff 模式（nil）整块省略。
+func TestRepoScanReportSections(t *testing.T) {
+	rep := newTestReport()
+	rep.RepoScan = &RepoScanAgg{
+		FilesCollected: 12,
+		FilesSkipped:   3,
+		SkipReasons:    map[string]int{"binary": 2, "symlink": 1},
+		ByDirectory: []DirStat{
+			{Dir: ".", Files: 5, Findings: 1, Warnings: 0, Density: 0.2},
+			{Dir: "internal/server", Files: 7, Findings: 1, Warnings: 0, Density: 0.14},
+		},
+		TopFiles: []FileRisk{{File: "config.go", Findings: 1, Warnings: 0, Weight: 5}},
+	}
+
+	// JSON 序列化含 repo_scan
+	j, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(j), `"repo_scan"`) || !strings.Contains(string(j), `"files_collected":12`) {
+		t.Error("JSON 应含 repo_scan 段")
+	}
+
+	// Markdown
+	md := rep.ToMarkdown()
+	for _, want := range []string{"整查聚合", "采集文件**: 12（跳过 3", "二进制 2", "符号链接 1", "(根目录)", "internal/server", "Top 风险文件"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Markdown 缺少 %q", want)
+		}
+	}
+
+	// HTML
+	h := rep.ToHTML()
+	for _, want := range []string{"文件风险分布", "跳过 <b>3</b>", "(根目录)", "Top 风险文件"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("HTML 缺少 %q", want)
+		}
+	}
+
+	// diff 模式（RepoScan = nil）：三格式整块省略
+	rep2 := newTestReport()
+	h2 := rep2.ToHTML()
+	if strings.Contains(h2, "文件风险分布") {
+		t.Error("无 repo_scan 时 HTML 不应渲染分布卡")
+	}
+	md2 := rep2.ToMarkdown()
+	if strings.Contains(md2, "整查聚合") {
+		t.Error("无 repo_scan 时 Markdown 不应有整查聚合段")
+	}
+	j2, _ := json.Marshal(rep2)
+	if strings.Contains(string(j2), `"repo_scan"`) {
+		t.Error("无 repo_scan 时 JSON 不应有序列化空段")
 	}
 }

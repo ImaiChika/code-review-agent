@@ -6,8 +6,10 @@
 package review
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,9 +43,19 @@ func TestReadFullRepoFiles_SymlinkAndUnreadable(t *testing.T) {
 		}
 	}
 
-	files, err := readFullRepoFiles(root)
+	files, stats, err := readFullRepoFiles(root, repoMaxFilesFullScan, nil)
 	if err != nil {
 		t.Fatalf("含符号链接/不可读文件的目录不应整体失败: %v", err)
+	}
+	// M9-G4：跳过明细应可解释（symlink 必跳过；unreadable 在非 root 下跳过）
+	if stats == nil || stats.skipped["symlink"] != 1 {
+		t.Errorf("符号链接应记入跳过明细，实际 %v", stats.skipped)
+	}
+	if os.Getuid() != 0 && stats.skipped["unreadable"] != 1 {
+		t.Errorf("不可读文件应记入跳过明细（非 root 环境），实际 %v", stats.skipped)
+	}
+	if stats.total != stats.skipped["symlink"]+stats.skipped["unreadable"]+stats.skipped["binary"]+stats.skipped["oversized"] {
+		t.Errorf("跳过总数应等于各原因之和: total=%d, %v", stats.total, stats.skipped)
 	}
 	found := false
 	for _, fd := range files {
@@ -56,5 +68,59 @@ func TestReadFullRepoFiles_SymlinkAndUnreadable(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("正常文件应被采集，实际 %d 个文件", len(files))
+	}
+}
+
+// TestReadFullRepoFiles_Progress M9-G5：大仓库采集分段进度——每过
+// collectProgressInterval 个文件回调一次（600 文件 → 恰好 1 次回调）。
+func TestReadFullRepoFiles_Progress(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 600; i++ {
+		name := filepath.Join(sub, fmt.Sprintf("f%03d.go", i))
+		if err := os.WriteFile(name, []byte("package pkg\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	callbacks := 0
+	lastSeen := 0
+	files, _, err := readFullRepoFiles(root, repoMaxFilesFullScan, func(collected int) {
+		callbacks++
+		lastSeen = collected
+	})
+	if err != nil {
+		t.Fatalf("采集失败: %v", err)
+	}
+	if len(files) != 600 {
+		t.Fatalf("应采集 600 个文件，实际 %d", len(files))
+	}
+	if callbacks != 1 || lastSeen != 500 {
+		t.Errorf("进度回调应为 1 次@500，实际 %d 次@%d", callbacks, lastSeen)
+	}
+}
+
+// TestReadFullRepoFiles_LimitTrustBoundary M9-G5：文件数上限按输入来源区分
+// 信任边界（repo_url 1000 / 本地全量 5000）——maxFiles 是参数，达上限报可读错误。
+func TestReadFullRepoFiles_LimitTrustBoundary(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("f%d.go", i)), []byte("package pkg\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, err := readFullRepoFiles(root, 2, nil)
+	if err == nil || !strings.Contains(err.Error(), "超过上限") {
+		t.Errorf("超过 maxFiles 应报可读错误: %v", err)
+	}
+	files, _, err := readFullRepoFiles(root, 3, nil)
+	if err != nil || len(files) != 3 {
+		t.Errorf("等于上限应放行: err=%v files=%d", err, len(files))
 	}
 }
