@@ -892,7 +892,7 @@ rules:
 | # | 扩展项 | 说明 | 工作量 |
 |---|--------|------|--------|
 | G1 | 全量扫描开关 | repo_path 模式 full_scan 参数：全文件按新增行审查；采集边界与 repo_url 共用；D7 增量自动生效 | S-M |
-| G2 | 代码角色系统集成 | coderole.go 接入引擎：按 production/test/example/config 角色调整规则适用与置信度；收敛散落的 _test.go 特判 | M |
+| G2 | 代码角色系统集成 ✅（2026-10-03 验证，并行会话产出） | 引擎已接线：多文件与单文件结果均按 DetectCodeRole 逐条 dampen（test/example 角色置信 cap 0.65 入 warnings）、//nolint 指令剔除；多语言测试判定（Go/Py/JS/TS/Java + testdata 目录）；与 ERR 位置约定/置信分层重构兼容（分层共存测试通过）。GEN-001 的 isConfigLanguage 即 config 角色的规则侧适用域 | M |
 | G3 | govulncheck 依赖漏洞检测 | 沙箱内运行官方 govulncheck -json，解析为 findings（source: tool:govulncheck）；container 需镜像预装/预刷漏洞库 | M |
 | G4 | 整查聚合视图 | 按目录发现密度、Top 风险文件、报告三格式同步 | S-M |
 | G5 | 大仓库性能护栏 | 三段耗时入 Monitor、分段进度、类型检查失败缓存 | S |
